@@ -8,7 +8,7 @@ describe("runtime response formatting", () => {
     expect(splitResponseMessages("hello", [])).toEqual(["hello"]);
   });
 
-  test("renders tool_use and tool_result inline in event order", () => {
+  test("renders tool_use inline in event order", () => {
     const events: AgentEvent[] = [
       {
         type: "text",
@@ -47,10 +47,8 @@ describe("runtime response formatting", () => {
     ];
 
     expect(summarizeToolMessages(events)).toEqual([
-      "调用 `web_search` (id: web_search:0) 输入: 2026年3月7日 新闻",
-      "返回 `web_search` (id: web_search:0)",
-      "调用 `web_search` (id: web_search:1) 输入: 2026年3月7日 国际新闻 热点",
-      "返回 `web_search` (id: web_search:1)",
+      "🛠️ 调用工具 `web_search` (id: web_search:0)，输入: 2026年3月7日 新闻",
+      "🛠️ 调用工具 `web_search` (id: web_search:1)，输入: 2026年3月7日 国际新闻 热点",
     ]);
 
     expect(
@@ -61,11 +59,9 @@ describe("runtime response formatting", () => {
     ).toBe(
       [
         "我来帮你搜索今天（2026年3月7日）的新闻。",
-        "调用 `web_search` (id: web_search:0) 输入: 2026年3月7日 新闻",
-        "返回 `web_search` (id: web_search:0)",
+        "🛠️ 调用工具 `web_search` (id: web_search:0)，输入: 2026年3月7日 新闻",
         "让我再搜索一些更多信息：",
-        "调用 `web_search` (id: web_search:1) 输入: 2026年3月7日 国际新闻 热点",
-        "返回 `web_search` (id: web_search:1)",
+        "🛠️ 调用工具 `web_search` (id: web_search:1)，输入: 2026年3月7日 国际新闻 热点",
         "以下是今天（2026年3月7日）的主要新闻总结：",
       ].join("\n\n"),
     );
@@ -77,11 +73,9 @@ describe("runtime response formatting", () => {
       ),
     ).toEqual([
       "我来帮你搜索今天（2026年3月7日）的新闻。",
-      "调用 `web_search` (id: web_search:0) 输入: 2026年3月7日 新闻",
-      "返回 `web_search` (id: web_search:0)",
+      "🛠️ 调用工具 `web_search` (id: web_search:0)，输入: 2026年3月7日 新闻",
       "让我再搜索一些更多信息：",
-      "调用 `web_search` (id: web_search:1) 输入: 2026年3月7日 国际新闻 热点",
-      "返回 `web_search` (id: web_search:1)",
+      "🛠️ 调用工具 `web_search` (id: web_search:1)，输入: 2026年3月7日 国际新闻 热点",
       "以下是今天（2026年3月7日）的主要新闻总结：",
     ]);
   });
@@ -113,8 +107,7 @@ describe("runtime response formatting", () => {
     ).toBe(
       [
         "我来帮你搜索今天的新闻。",
-        "调用 `web_search` (id: web_search:0) 输入: 2026年3月7日 新闻",
-        "返回 `web_search` (id: web_search:0)",
+        "🛠️ 调用工具 `web_search` (id: web_search:0)，输入: 2026年3月7日 新闻",
         "iflow 在工具执行后结束了当前轮次，但没有产出最终回复；已重置底层会话。",
       ].join("\n\n"),
     );
@@ -126,9 +119,33 @@ describe("runtime response formatting", () => {
       ),
     ).toEqual([
       "我来帮你搜索今天的新闻。",
-      "调用 `web_search` (id: web_search:0) 输入: 2026年3月7日 新闻",
-      "返回 `web_search` (id: web_search:0)",
+      "🛠️ 调用工具 `web_search` (id: web_search:0)，输入: 2026年3月7日 新闻",
       "iflow 在工具执行后结束了当前轮次，但没有产出最终回复；已重置底层会话。",
+    ]);
+  });
+
+  test("shows running then done when a tool call spans across text events", () => {
+    const events: AgentEvent[] = [
+      {
+        type: "tool_use",
+        requestId: "shell:0",
+        toolName: "run_shell_command",
+        toolInput: "echo hello",
+      },
+      {
+        type: "text",
+        content: "正在处理命令执行结果。",
+      },
+      {
+        type: "tool_result",
+        requestId: "shell:0",
+        content: "ok",
+      },
+    ];
+
+    expect(splitResponseMessages("正在处理命令执行结果。", events)).toEqual([
+      "🛠️ 调用工具 `run_shell_command` (id: shell:0)，输入: echo hello",
+      "正在处理命令执行结果。",
     ]);
   });
 });

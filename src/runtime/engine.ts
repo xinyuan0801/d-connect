@@ -52,71 +52,144 @@ function hasModeControl(agent: AgentAdapter): agent is AgentAdapter & ModeSwitch
   );
 }
 
-export function summarizeToolMessages(events: AgentEvent[]): string[] {
-  const toolNames = new Map<string, string>();
-  const lines: string[] = [];
+interface PendingToolUse {
+  toolName: string;
+  requestId?: string;
+  toolInput?: string;
+}
 
-  for (const event of events) {
-    if (event.type === "tool_use") {
-      const toolName = event.toolName?.trim() || "unknown";
-      if (event.requestId) {
-        toolNames.set(event.requestId, toolName);
-      }
-      const idPart = event.requestId ? ` (id: ${event.requestId})` : "";
-      const inputPart = event.toolInput?.trim() ? ` 输入: ${event.toolInput.trim()}` : "";
-      lines.push(`调用 \`${toolName}\`${idPart}${inputPart}`);
-      continue;
-    }
+interface EventRenderState {
+  toolNames: Map<string, string>;
+}
 
-    if (event.type === "tool_result") {
-      const toolName = (event.requestId ? toolNames.get(event.requestId) : "") || event.toolName?.trim() || "unknown";
-      const idPart = event.requestId ? ` (id: ${event.requestId})` : "";
-      lines.push(`返回 \`${toolName}\`${idPart}`);
-    }
+interface EventRenderOptions {
+  includeText: boolean;
+  includeErrors: boolean;
+}
+
+const MAX_TOOL_INPUT_LENGTH = 180;
+const TOOL_CALL_EMOJI = "🛠️";
+
+function normalizeInlineText(text: string, maxLength: number): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLength)}...`;
+}
+
+function normalizeToolInput(toolInput?: string): string {
+  if (!toolInput) {
+    return "";
+  }
+  return normalizeInlineText(toolInput, MAX_TOOL_INPUT_LENGTH);
+}
+
+function createEventRenderState(): EventRenderState {
+  return {
+    toolNames: new Map<string, string>(),
+  };
+}
+
+function toolTag(toolName: string, requestId?: string): string {
+  if (!requestId) {
+    return `\`${toolName}\``;
+  }
+  return `\`${toolName}\` (id: ${requestId})`;
+}
+
+function renderToolRunning(use: PendingToolUse): string {
+  const inputPart = use.toolInput ? `，输入: ${use.toolInput}` : "";
+  return `${TOOL_CALL_EMOJI} 调用工具 ${toolTag(use.toolName, use.requestId)}${inputPart}`;
+}
+
+function flushPendingToolUseMessages(state: EventRenderState): string[] {
+  return [];
+}
+
+function renderToolUseEvent(event: AgentEvent, state: EventRenderState): string[] {
+  const toolName = event.toolName?.trim() || "unknown";
+  const toolInput = normalizeToolInput(event.toolInput);
+  const requestId = event.requestId?.trim();
+  if (requestId) {
+    state.toolNames.set(requestId, toolName);
   }
 
-  return lines;
+  return [
+    renderToolRunning({
+      toolName,
+      requestId,
+      toolInput: toolInput || undefined,
+    }),
+  ];
+}
+
+function renderToolResultEvent(event: AgentEvent, state: EventRenderState): string[] {
+  return [];
+}
+
+function renderEventToMessages(event: AgentEvent, state: EventRenderState, options: EventRenderOptions): string[] {
+  if (event.type === "tool_use") {
+    return renderToolUseEvent(event, state);
+  }
+
+  if (event.type === "tool_result") {
+    return renderToolResultEvent(event, state);
+  }
+
+  const messages = flushPendingToolUseMessages(state);
+
+  if (event.type === "text" && options.includeText) {
+    const content = event.content?.trim();
+    if (content) {
+      messages.push(content);
+    }
+    return messages;
+  }
+
+  if (event.type === "error" && options.includeErrors) {
+    const content = event.content?.trim();
+    if (content) {
+      messages.push(`agent error: ${content}`);
+    }
+    return messages;
+  }
+
+  return messages;
+}
+
+function buildMessagesFromEvents(events: AgentEvent[], options: EventRenderOptions): string[] {
+  const state = createEventRenderState();
+  const messages: string[] = [];
+  for (const event of events) {
+    messages.push(...renderEventToMessages(event, state, options));
+  }
+  messages.push(...flushPendingToolUseMessages(state));
+  return messages;
+}
+
+export function summarizeToolMessages(events: AgentEvent[]): string[] {
+  return buildMessagesFromEvents(events, { includeText: false, includeErrors: false });
 }
 
 export function splitResponseMessages(response: string, events: AgentEvent[]): string[] {
+  const messages = buildEventMessages(events);
+  return messages.concat(buildSuffixMessage(response, events, messages));
+}
+
+function buildEventMessages(events: AgentEvent[]): string[] {
+  return buildMessagesFromEvents(events, { includeText: true, includeErrors: true });
+}
+
+function buildSuffixMessage(response: string, events: AgentEvent[], messages: string[]): string[] {
   const body = response.trim() || "done";
-  const toolNames = new Map<string, string>();
-  const messages: string[] = [];
   const textParts: string[] = [];
 
   for (const event of events) {
     if (event.type === "text") {
       const content = event.content?.trim();
-      if (!content) {
-        continue;
-      }
-      messages.push(content);
-      textParts.push(content);
-      continue;
-    }
-
-    if (event.type === "tool_use") {
-      const toolName = event.toolName?.trim() || "unknown";
-      if (event.requestId) {
-        toolNames.set(event.requestId, toolName);
-      }
-      const idPart = event.requestId ? ` (id: ${event.requestId})` : "";
-      const inputPart = event.toolInput?.trim() ? ` 输入: ${event.toolInput.trim()}` : "";
-      messages.push(`调用 \`${toolName}\`${idPart}${inputPart}`);
-      continue;
-    }
-
-    if (event.type === "tool_result") {
-      const toolName = (event.requestId ? toolNames.get(event.requestId) : "") || event.toolName?.trim() || "unknown";
-      const idPart = event.requestId ? ` (id: ${event.requestId})` : "";
-      messages.push(`返回 \`${toolName}\`${idPart}`);
-      continue;
-    }
-
-    if (event.type === "error") {
-      const content = event.content?.trim();
       if (content) {
-        messages.push(`agent error: ${content}`);
+        textParts.push(content);
       }
     }
   }
@@ -125,31 +198,38 @@ export function splitResponseMessages(response: string, events: AgentEvent[]): s
     return [body];
   }
 
+  const lastMessage = messages.at(-1)?.trim();
+  if (lastMessage && lastMessage === body) {
+    return [];
+  }
+
   const renderedBody = messages.join("\n\n");
   if (renderedBody === body || body === "done") {
-    return messages;
+    return [];
   }
 
   const textBody = textParts.join("\n\n");
+  const lastText = textParts.at(-1);
+  if (lastText && lastText === body) {
+    return [];
+  }
   if (!textBody) {
-    messages.push(body);
-    return messages;
+    return [body];
   }
 
   if (body === textBody) {
-    return messages;
+    return [];
   }
 
   if (body.startsWith(textBody)) {
     const suffix = body.slice(textBody.length).trim();
     if (suffix.length > 0) {
-      messages.push(suffix);
+      return [suffix];
     }
-    return messages;
+    return [];
   }
 
-  messages.push(body);
-  return messages;
+  return [body];
 }
 
 export function formatResponseFromEvents(response: string, events: AgentEvent[]): string {
@@ -258,6 +338,7 @@ export class RuntimeEngine implements CronExecutor {
     runtime: ProjectRuntime,
     session: SessionRecord,
     prompt: string,
+    options?: { onMessage?: (message: string) => Promise<void> },
   ): Promise<{ response: string; events: AgentEvent[] }> {
     if (!this.sessionStore.tryLock(session)) {
       return {
@@ -267,6 +348,22 @@ export class RuntimeEngine implements CronExecutor {
     }
 
     const events: AgentEvent[] = [];
+    const onMessage = options?.onMessage;
+    const streaming = typeof onMessage === "function";
+    const renderState = createEventRenderState();
+    let queuedMessages = Promise.resolve();
+    let emittedMessages = 0;
+
+    const enqueueMessage = (message: string): void => {
+      const content = message.trim();
+      if (!content) {
+        return;
+      }
+      if (streaming && onMessage) {
+        queuedMessages = queuedMessages.then(() => onMessage(content));
+        emittedMessages += 1;
+      }
+    };
 
     try {
       const agentSession = await this.ensureAgentSession(runtime, session);
@@ -275,6 +372,9 @@ export class RuntimeEngine implements CronExecutor {
         events.push(event);
         if (event.sessionId && event.sessionId.length > 0) {
           this.sessionStore.setAgentSessionId(session, event.sessionId);
+        }
+        for (const message of renderEventToMessages(event, renderState, { includeText: true, includeErrors: true })) {
+          enqueueMessage(message);
         }
       };
 
@@ -289,6 +389,10 @@ export class RuntimeEngine implements CronExecutor {
         agentSession.off("event", onEvent);
       }
 
+      for (const message of flushPendingToolUseMessages(renderState)) {
+        enqueueMessage(message);
+      }
+
       this.sessionStore.setAgentSessionId(session, agentSession.currentSessionId());
 
       const resultEvents = events.filter((event) => event.type === "result" && event.content && event.content.trim().length > 0);
@@ -299,6 +403,15 @@ export class RuntimeEngine implements CronExecutor {
       const text = textEvents.length > 0 ? textEvents.map((event) => event.content?.trim()).join("\n").trim() : "";
       const errorText = errorEvents.length > 0 ? `agent error: ${errorEvents.at(-1)?.content}` : "";
       const response = formatResponseFromEvents(resultText || text || errorText || "done", events);
+      if (streaming) {
+        const finalMessages = splitResponseMessages(resultText || text || errorText || "done", events);
+        for (let i = emittedMessages; i < finalMessages.length; i += 1) {
+          const message = finalMessages[i];
+          enqueueMessage(message);
+        }
+      }
+
+      await queuedMessages;
 
       this.sessionStore.addHistory(session, "assistant", response);
       await this.sessionStore.save();
@@ -309,6 +422,13 @@ export class RuntimeEngine implements CronExecutor {
       };
     } catch (error) {
       const message = formatResponseFromEvents(`agent execution failed: ${(error as Error).message}`, events);
+      if (streaming) {
+        const finalMessages = splitResponseMessages(message, events);
+        for (let i = emittedMessages; i < finalMessages.length; i += 1) {
+          enqueueMessage(finalMessages[i]);
+        }
+        await queuedMessages;
+      }
       this.sessionStore.addHistory(session, "assistant", message);
       await this.sessionStore.save();
       return {
@@ -460,13 +580,29 @@ export class RuntimeEngine implements CronExecutor {
 
     let response = "";
     let events: AgentEvent[] = [];
+    const isCommand = input.content.trim().startsWith("/");
 
-    if (input.content.trim().startsWith("/")) {
+    if (isCommand) {
       response = await this.handleCommand(runtime, input.project, input.sessionKey, userKey, session, input.content);
     } else {
-      const output = await this.runAgent(runtime, session, input.content);
+      const output = await this.runAgent(runtime, session, input.content, {
+        onMessage: replyTarget
+          ? async (message: string): Promise<void> => {
+              await replyTarget.platform.reply(replyTarget.replyCtx, message);
+            }
+          : undefined,
+      });
       response = output.response;
       events = output.events;
+    }
+
+    if (replyTarget && isCommand && response.trim().length > 0) {
+      for (const reply of splitResponseMessages(response, events)) {
+        if (reply.trim().length === 0) {
+          continue;
+        }
+        await replyTarget.platform.reply(replyTarget.replyCtx, reply);
+      }
     }
 
     return {
@@ -499,7 +635,7 @@ export class RuntimeEngine implements CronExecutor {
   private async handlePlatformMessage(project: string, platform: PlatformAdapter, message: PlatformMessage): Promise<void> {
     const runtime = this.getProjectRuntime(project);
 
-    const result = await this.dispatch(
+    await this.dispatch(
       runtime,
       {
         project,
@@ -513,13 +649,6 @@ export class RuntimeEngine implements CronExecutor {
         replyCtx: message.replyCtx,
       },
     );
-
-    for (const reply of splitResponseMessages(result.response, result.events)) {
-      if (reply.trim().length === 0) {
-        continue;
-      }
-      await platform.reply(message.replyCtx, reply);
-    }
   }
 
   async executeCronJob(job: CronJob): Promise<void> {
