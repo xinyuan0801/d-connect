@@ -1,0 +1,134 @@
+import { describe, expect, test } from "vitest";
+import { formatResponseFromEvents, splitResponseMessages, summarizeToolMessages } from "../src/runtime/engine.js";
+import type { AgentEvent } from "../src/runtime/types.js";
+
+describe("runtime response formatting", () => {
+  test("returns the body when no visible events were emitted", () => {
+    expect(formatResponseFromEvents("hello", [])).toBe("hello");
+    expect(splitResponseMessages("hello", [])).toEqual(["hello"]);
+  });
+
+  test("renders tool_use and tool_result inline in event order", () => {
+    const events: AgentEvent[] = [
+      {
+        type: "text",
+        content: "我来帮你搜索今天（2026年3月7日）的新闻。",
+      },
+      {
+        type: "tool_use",
+        requestId: "web_search:0",
+        toolName: "web_search",
+        toolInput: "2026年3月7日 新闻",
+      },
+      {
+        type: "tool_result",
+        requestId: "web_search:0",
+        content: "Search results returned.",
+      },
+      {
+        type: "text",
+        content: "让我再搜索一些更多信息：",
+      },
+      {
+        type: "tool_use",
+        requestId: "web_search:1",
+        toolName: "web_search",
+        toolInput: "2026年3月7日 国际新闻 热点",
+      },
+      {
+        type: "tool_result",
+        requestId: "web_search:1",
+        content: "Search results returned.",
+      },
+      {
+        type: "text",
+        content: "以下是今天（2026年3月7日）的主要新闻总结：",
+      },
+    ];
+
+    expect(summarizeToolMessages(events)).toEqual([
+      "调用 `web_search` (id: web_search:0) 输入: 2026年3月7日 新闻",
+      "返回 `web_search` (id: web_search:0)",
+      "调用 `web_search` (id: web_search:1) 输入: 2026年3月7日 国际新闻 热点",
+      "返回 `web_search` (id: web_search:1)",
+    ]);
+
+    expect(
+      formatResponseFromEvents(
+        "我来帮你搜索今天（2026年3月7日）的新闻。\n\n让我再搜索一些更多信息：\n\n以下是今天（2026年3月7日）的主要新闻总结：",
+        events,
+      ),
+    ).toBe(
+      [
+        "我来帮你搜索今天（2026年3月7日）的新闻。",
+        "调用 `web_search` (id: web_search:0) 输入: 2026年3月7日 新闻",
+        "返回 `web_search` (id: web_search:0)",
+        "让我再搜索一些更多信息：",
+        "调用 `web_search` (id: web_search:1) 输入: 2026年3月7日 国际新闻 热点",
+        "返回 `web_search` (id: web_search:1)",
+        "以下是今天（2026年3月7日）的主要新闻总结：",
+      ].join("\n\n"),
+    );
+
+    expect(
+      splitResponseMessages(
+        "我来帮你搜索今天（2026年3月7日）的新闻。\n\n让我再搜索一些更多信息：\n\n以下是今天（2026年3月7日）的主要新闻总结：",
+        events,
+      ),
+    ).toEqual([
+      "我来帮你搜索今天（2026年3月7日）的新闻。",
+      "调用 `web_search` (id: web_search:0) 输入: 2026年3月7日 新闻",
+      "返回 `web_search` (id: web_search:0)",
+      "让我再搜索一些更多信息：",
+      "调用 `web_search` (id: web_search:1) 输入: 2026年3月7日 国际新闻 热点",
+      "返回 `web_search` (id: web_search:1)",
+      "以下是今天（2026年3月7日）的主要新闻总结：",
+    ]);
+  });
+
+  test("keeps the post-tool warning after ordered event rendering", () => {
+    const events: AgentEvent[] = [
+      {
+        type: "text",
+        content: "我来帮你搜索今天的新闻。",
+      },
+      {
+        type: "tool_use",
+        requestId: "web_search:0",
+        toolName: "web_search",
+        toolInput: "2026年3月7日 新闻",
+      },
+      {
+        type: "tool_result",
+        requestId: "web_search:0",
+        content: "Search results returned.",
+      },
+    ];
+
+    expect(
+      formatResponseFromEvents(
+        "我来帮你搜索今天的新闻。\n\niflow 在工具执行后结束了当前轮次，但没有产出最终回复；已重置底层会话。",
+        events,
+      ),
+    ).toBe(
+      [
+        "我来帮你搜索今天的新闻。",
+        "调用 `web_search` (id: web_search:0) 输入: 2026年3月7日 新闻",
+        "返回 `web_search` (id: web_search:0)",
+        "iflow 在工具执行后结束了当前轮次，但没有产出最终回复；已重置底层会话。",
+      ].join("\n\n"),
+    );
+
+    expect(
+      splitResponseMessages(
+        "我来帮你搜索今天的新闻。\n\niflow 在工具执行后结束了当前轮次，但没有产出最终回复；已重置底层会话。",
+        events,
+      ),
+    ).toEqual([
+      "我来帮你搜索今天的新闻。",
+      "调用 `web_search` (id: web_search:0) 输入: 2026年3月7日 新闻",
+      "返回 `web_search` (id: web_search:0)",
+      "iflow 在工具执行后结束了当前轮次，但没有产出最终回复；已重置底层会话。",
+    ]);
+  });
+});
