@@ -29,9 +29,13 @@ export async function resolveAndLoadConfig(explicitConfigPath?: string) {
 export async function startApp(options: StartAppOptions = {}): Promise<void> {
   const { config, configPath } = await resolveAndLoadConfig(options.explicitConfigPath);
   await ensureDir(config.dataDir!);
+  const logDir = join(config.dataDir!, "logs");
+  const logPath = join(logDir, "d-connect.log");
+  await ensureDir(logDir);
+  await Logger.configureFile(logPath);
 
   const logger = new Logger(config.log.level).child("d-connect");
-  logger.info("starting", { configPath, dataDir: config.dataDir });
+  logger.info("starting", { configPath, dataDir: config.dataDir, logPath });
 
   const cronStore = await createCronStore(config.dataDir!);
   const cronScheduler = new CronScheduler(cronStore, logger.child("cron"), config.cron.silent);
@@ -65,6 +69,8 @@ export async function startApp(options: StartAppOptions = {}): Promise<void> {
       logger.error("failed to stop cleanly", {
         error: (error as Error).message,
       });
+    } finally {
+      await Logger.closeFile();
     }
   };
 

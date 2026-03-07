@@ -232,6 +232,26 @@ function buildSuffixMessage(response: string, events: AgentEvent[], messages: st
   return [body];
 }
 
+function previewLogText(value: string | undefined, max = 320): string | undefined {
+  if (!value) {
+    return value;
+  }
+
+  return value.length > max ? `${value.slice(0, max)}...` : value;
+}
+
+function summarizeAgentEventForLog(event: AgentEvent): Record<string, unknown> {
+  return {
+    type: event.type,
+    sessionId: event.sessionId,
+    requestId: event.requestId,
+    toolName: event.toolName,
+    toolInput: previewLogText(event.toolInput),
+    content: previewLogText(event.content),
+    done: event.done === true,
+  };
+}
+
 export function formatResponseFromEvents(response: string, events: AgentEvent[]): string {
   return splitResponseMessages(response, events).join("\n\n");
 }
@@ -354,11 +374,25 @@ export class RuntimeEngine implements CronExecutor {
     let queuedMessages = Promise.resolve();
     let emittedMessages = 0;
 
+    this.logger.debug("runtime agent run start", {
+      project: runtime.config.name,
+      sessionId: session.id,
+      agentSessionId: session.agentSessionId,
+      streaming,
+      prompt: previewLogText(prompt, 1000),
+    });
+
     const enqueueMessage = (message: string): void => {
       const content = message.trim();
       if (!content) {
         return;
       }
+      this.logger.debug("runtime streaming message", {
+        project: runtime.config.name,
+        sessionId: session.id,
+        index: emittedMessages + 1,
+        content: previewLogText(content, 1000),
+      });
       if (streaming && onMessage) {
         queuedMessages = queuedMessages.then(() => onMessage(content));
         emittedMessages += 1;
@@ -370,6 +404,11 @@ export class RuntimeEngine implements CronExecutor {
 
       const onEvent = (event: AgentEvent): void => {
         events.push(event);
+        this.logger.debug("runtime agent event", {
+          project: runtime.config.name,
+          sessionId: session.id,
+          ...summarizeAgentEventForLog(event),
+        });
         if (event.sessionId && event.sessionId.length > 0) {
           this.sessionStore.setAgentSessionId(session, event.sessionId);
         }
@@ -403,6 +442,16 @@ export class RuntimeEngine implements CronExecutor {
       const text = textEvents.length > 0 ? textEvents.map((event) => event.content?.trim()).join("\n").trim() : "";
       const errorText = errorEvents.length > 0 ? `agent error: ${errorEvents.at(-1)?.content}` : "";
       const response = formatResponseFromEvents(resultText || text || errorText || "done", events);
+      this.logger.info("runtime agent run completed", {
+        project: runtime.config.name,
+        sessionId: session.id,
+        agentSessionId: agentSession.currentSessionId(),
+        eventCount: events.length,
+        textEvents: textEvents.length,
+        resultEvents: resultEvents.length,
+        errorEvents: errorEvents.length,
+        response: previewLogText(response, 2000),
+      });
       if (streaming) {
         const finalMessages = splitResponseMessages(resultText || text || errorText || "done", events);
         for (let i = emittedMessages; i < finalMessages.length; i += 1) {
@@ -422,6 +471,13 @@ export class RuntimeEngine implements CronExecutor {
       };
     } catch (error) {
       const message = formatResponseFromEvents(`agent execution failed: ${(error as Error).message}`, events);
+      this.logger.error("runtime agent run failed", {
+        project: runtime.config.name,
+        sessionId: session.id,
+        error: (error as Error).message,
+        eventCount: events.length,
+        response: previewLogText(message, 2000),
+      });
       if (streaming) {
         const finalMessages = splitResponseMessages(message, events);
         for (let i = emittedMessages; i < finalMessages.length; i += 1) {
