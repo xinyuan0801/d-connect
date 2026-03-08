@@ -57,7 +57,6 @@
 
 ```bash
 npm install -g @xinyuan0801/d-connect
-d-connect --help
 ```
 
 ### 2. 生成配置
