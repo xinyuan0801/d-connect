@@ -148,7 +148,7 @@ pnpm run dev add -c ./config.json
 - `allowFrom`：`*` 表示允许全部用户，也可填写逗号分隔的用户 ID
 - `loop.silent`：默认 loop 是否只执行不回推到平台
 - `processingNotice`：DingTalk 处理中的轻量提示，设为 `"none"` 可关闭
-- `guard.enabled`：默认关闭；开启后，IM 入站消息在真正执行前会先交给同 project 的 agent 做一次安全判定
+- `guard.enabled`：默认关闭；开启后，普通 IM 入站消息在真正执行前会先交给同 project 的 agent 做一次安全判定；`/new`、`/list` 这类 slash command 不经过 guard
 - `guard.rules`：可选的自定义 guard 规则文本，会和内置规则一起参与判定；建议写成明确的中文约束
 
 ### 3. 启动守护进程

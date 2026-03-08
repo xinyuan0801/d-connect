@@ -445,4 +445,72 @@ describe("runtime integration", () => {
 
     await runtime.stop();
   });
+
+  test("skips guard for slash commands from platform messages", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "d-connect-runtime-"));
+    const config = {
+      configVersion: 1,
+      dataDir,
+      log: { level: "error" as const },
+      loop: { silent: false },
+      projects: [
+        {
+          name: "demo",
+          agent: {
+            type: "claudecode" as const,
+            options: {
+              cmd: "fake",
+            },
+          },
+          guard: {
+            enabled: true,
+            rules: "禁止任何请求。",
+          },
+          platforms: [
+            {
+              type: "feishu" as const,
+              options: {
+                appId: "app-id",
+                appSecret: "app-secret",
+                allowFrom: "*",
+                groupReplyAll: false,
+                reactionEmoji: "none",
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const runtime = new RuntimeEngine(config, new Logger("error"));
+    await runtime.start();
+
+    const platform = mockState.platformInstances[0] as FakePlatform | undefined;
+    const agent = mockState.agentInstances[0] as FakeAgent | undefined;
+
+    await platform?.deliver({
+      platform: "feishu",
+      sessionKey: "feishu:chat-1:user-1",
+      userId: "user-1",
+      userName: "User 1",
+      content: "/new review",
+      replyContext: {
+        messageId: "om_cmd",
+        chatId: "chat-1",
+      },
+      deliveryTarget: {
+        platform: "feishu",
+        payload: {
+          chatId: "chat-1",
+        },
+      },
+    });
+
+    expect(agent?.guardPrompts).toHaveLength(0);
+    expect(agent?.conversationPrompts).toHaveLength(0);
+    expect(platform?.replies).toHaveLength(1);
+    expect(platform?.replies[0]?.content).toContain("created session");
+
+    await runtime.stop();
+  });
 });

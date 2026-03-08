@@ -37,6 +37,10 @@ interface CommandDispatchResult {
   result: TurnResult;
 }
 
+function isSlashCommandMessage(content: string): boolean {
+  return content.trim().startsWith("/");
+}
+
 export class DaemonRuntime implements JobExecutor {
   private readonly registry: ProjectRegistry;
   private readonly relay = new MessageRelay();
@@ -96,7 +100,7 @@ export class DaemonRuntime implements JobExecutor {
     session: SessionRecord,
     options: DispatchOptions,
   ): Promise<CommandDispatchResult> {
-    if (input.content.trim().startsWith("/")) {
+    if (isSlashCommandMessage(input.content)) {
       const commandResult = await this.commandService.handle({
         runtime,
         project: input.project,
@@ -210,7 +214,7 @@ export class DaemonRuntime implements JobExecutor {
       throw new Error(`platform not found for project ${project}: ${platformName}`);
     }
 
-    if (runtime.config.guard?.enabled === true) {
+    if (runtime.config.guard?.enabled === true && !isSlashCommandMessage(message.content)) {
       const decision = await this.guardService.evaluate(runtime, {
         project,
         sessionKey: message.sessionKey,
