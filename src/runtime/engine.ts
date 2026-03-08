@@ -1,9 +1,9 @@
-import type { CronJob } from "../core/types.js";
+import type { LoopJob } from "../core/types.js";
 import type { AppConfig } from "../config/schema.js";
 import type { ResolvedAppConfig } from "../config/normalize.js";
 import { normalizeConfig } from "../config/normalize.js";
 import { Logger } from "../infra/logging/logger.js";
-import { CronScheduler } from "../scheduler/cron.js";
+import { LoopScheduler } from "../scheduler/loop.js";
 import { DaemonRuntime, type RuntimeSendInput, type RuntimeSendResult } from "../services/daemon-runtime.js";
 export { formatResponseFromEvents, splitResponseMessages, summarizeToolMessages } from "../services/message-relay.js";
 
@@ -18,14 +18,14 @@ export class RuntimeEngine {
   constructor(
     config: AppConfig | ResolvedAppConfig,
     private readonly logger: Logger,
-    private readonly cronScheduler?: CronScheduler,
+    private readonly loopScheduler?: LoopScheduler,
   ) {
     this.resolvedConfig = isResolvedConfig(config) ? config : normalizeConfig(config);
   }
 
   private async ensureRuntime(): Promise<DaemonRuntime> {
     if (!this.runtime) {
-      this.runtime = await DaemonRuntime.create(this.resolvedConfig, this.logger, this.cronScheduler);
+      this.runtime = await DaemonRuntime.create(this.resolvedConfig, this.logger, this.loopScheduler);
     }
     return this.runtime;
   }
@@ -48,14 +48,14 @@ export class RuntimeEngine {
     return runtime.send(input);
   }
 
-  async executeJob(job: CronJob): Promise<void> {
+  async executeJob(job: LoopJob): Promise<void> {
     const runtime = await this.ensureRuntime();
     await runtime.executeJob(job);
   }
 
-  async executeCronJob(job: CronJob): Promise<void> {
+  async executeLoopJob(job: LoopJob): Promise<void> {
     const runtime = await this.ensureRuntime();
-    await runtime.executeCronJob(job);
+    await runtime.executeLoopJob(job);
   }
 }
 

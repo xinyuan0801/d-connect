@@ -9,7 +9,7 @@ function validConfigJson(): string {
     {
       configVersion: 1,
       log: { level: "info" },
-      cron: { silent: false },
+      loop: { silent: false },
       projects: [
         {
           name: "p1",

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { CronJob } from "../runtime/types.js";
+import type { LoopJob } from "../runtime/types.js";
 
 export const sendRequestSchema = z.object({
   project: z.string().min(1),
@@ -7,16 +7,16 @@ export const sendRequestSchema = z.object({
   content: z.string().min(1),
 });
 
-export const cronAddRequestSchema = z.object({
+export const loopAddRequestSchema = z.object({
   project: z.string().min(1),
   sessionKey: z.string().min(1),
-  cronExpr: z.string().min(1),
+  scheduleExpr: z.string().min(1),
   prompt: z.string().min(1),
   description: z.string().default(""),
   silent: z.boolean().optional(),
 });
 
-export const cronDelRequestSchema = z.object({
+export const loopDelRequestSchema = z.object({
   id: z.string().min(1),
 });
 
@@ -39,6 +39,6 @@ export interface SendResponse {
   response: string;
 }
 
-export interface CronListResponse {
-  jobs: CronJob[];
+export interface LoopListResponse {
+  jobs: LoopJob[];
 }

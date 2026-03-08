@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { bootstrapConfig, fileExists, loadConfig, normalizeConfig, resolveConfigPath } from "../config/index.js";
 import { Logger } from "../infra/logging/logger.js";
-import { createCronStore, CronScheduler } from "../scheduler/cron.js";
+import { createLoopStore, LoopScheduler } from "../scheduler/loop.js";
 import { RuntimeEngine } from "../runtime/engine.js";
 import { ensureDir } from "../infra/store-json/atomic.js";
 import { ensureSocketAvailable, IpcServer } from "../ipc/server.js";
@@ -41,19 +41,19 @@ export async function startDaemon(options: StartAppOptions = {}): Promise<void> 
   const logger = new Logger(config.log.level).child("d-connect");
   logger.info("starting", { configPath, dataDir: config.dataDir, logPath });
 
-  const cronStore = await createCronStore(config.dataDir);
-  const cronScheduler = new CronScheduler(cronStore, logger.child("cron"), config.cron.silent);
-  const runtime = new RuntimeEngine(config, logger.child("runtime"), cronScheduler);
+  const loopStore = await createLoopStore(config.dataDir);
+  const loopScheduler = new LoopScheduler(loopStore, logger.child("loop"), config.loop.silent);
+  const runtime = new RuntimeEngine(config, logger.child("runtime"), loopScheduler);
   const ipcServer = new IpcServer({
     socketPath: join(config.dataDir, "ipc.sock"),
     runtime,
-    cron: cronScheduler,
+    loop: loopScheduler,
     logger: logger.child("ipc"),
   });
 
   await ensureSocketAvailable(join(config.dataDir, "ipc.sock"));
   await runtime.start();
-  await cronScheduler.start();
+  await loopScheduler.start();
   await ipcServer.start();
 
   let stopping = false;
@@ -65,7 +65,7 @@ export async function startDaemon(options: StartAppOptions = {}): Promise<void> 
     logger.info("stopping", { signal });
 
     try {
-      cronScheduler.stop();
+      loopScheduler.stop();
       await ipcServer.stop();
       await runtime.stop();
       logger.info("stopped");

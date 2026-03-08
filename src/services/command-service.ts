@@ -2,7 +2,7 @@ import type { ModeSwitchable } from "../core/types.js";
 import type { ProjectRuntime } from "./project-registry.js";
 import type { SessionRecord } from "./session-repository.js";
 import { ConversationService } from "./conversation-service.js";
-import { CronScheduler } from "../scheduler/cron.js";
+import { LoopScheduler } from "../scheduler/loop.js";
 import cron from "node-cron";
 
 function hasModeControl(agent: ProjectRuntime["agent"]): agent is ProjectRuntime["agent"] & ModeSwitchable {
@@ -22,145 +22,188 @@ export interface CommandContext {
   raw: string;
 }
 
-function parseCronAddInput(raw: string): { cronExpr: string; prompt: string } | null {
+export interface HandledCommandResult {
+  kind: "handled";
+  response: string;
+}
+
+export interface ForwardCommandResult {
+  kind: "forward_to_agent";
+  prompt: string;
+}
+
+export type CommandResult = HandledCommandResult | ForwardCommandResult;
+
+function parseLoopAddInput(raw: string): { scheduleExpr: string; prompt: string } | null {
   const tokens = raw.trim().split(/\s+/).slice(2);
   for (const fieldCount of [6, 5, 1]) {
     if (tokens.length <= fieldCount) {
       continue;
     }
-    const cronExpr = tokens.slice(0, fieldCount).join(" ").trim();
+    const scheduleExpr = tokens.slice(0, fieldCount).join(" ").trim();
     const prompt = tokens.slice(fieldCount).join(" ").trim();
     if (!prompt) {
       continue;
     }
-    if (fieldCount === 1 || cron.validate(cronExpr)) {
-      return { cronExpr, prompt };
+    if (fieldCount === 1 || cron.validate(scheduleExpr)) {
+      return { scheduleExpr, prompt };
     }
   }
   return null;
 }
 
+function handled(response: string): HandledCommandResult {
+  return {
+    kind: "handled",
+    response,
+  };
+}
+
+function buildLoopCommandPrompt(project: string, sessionKey: string, request: string): string {
+  const quotedProject = JSON.stringify(project);
+  const quotedSessionKey = JSON.stringify(sessionKey);
+
+  return [
+    "用户想创建一个 d-connect loop 任务。",
+    "d-connect 支持通过命令行添加 loop 任务。",
+    `当前 project: ${project}`,
+    `当前 sessionKey: ${sessionKey}`,
+    "请根据下面的请求整理合适的调度表达式和任务 prompt，并优先直接使用命令行创建任务。",
+    `可用命令：d-connect loop add -p ${quotedProject} -s ${quotedSessionKey} -e \"<scheduleExpr>\" \"<prompt>\"`,
+    "如果用户请求里已经给出了调度规则，直接使用；如果信息不足，再向用户确认。",
+    `用户请求：${request}`,
+  ].join("\n");
+}
+
 export class CommandService {
   constructor(
     private readonly conversations: ConversationService,
-    private readonly cronScheduler?: CronScheduler,
+    private readonly loopScheduler?: LoopScheduler,
   ) {}
 
-  async handle(context: CommandContext): Promise<string> {
+  async handle(context: CommandContext): Promise<CommandResult> {
     const { runtime, project, sessionKey, session, raw } = context;
     const parts = raw.trim().slice(1).split(/\s+/);
     const command = (parts[0] ?? "").toLowerCase();
 
     switch (command) {
       case "help":
-        return [
+        return handled([
           "commands:",
           "/help",
           "/new [name]",
           "/list",
           "/switch <id|name>",
           "/mode [name]",
-          "/cron list",
-          "/cron add <expr> <prompt>",
-          "/cron del <id>",
-        ].join("\n");
+          "/loop <request>",
+          "/loop list",
+          "/loop add <expr> <prompt>",
+          "/loop del <id>",
+        ].join("\n"));
 
       case "new": {
         const name = parts.slice(1).join(" ").trim() || `session-${Date.now()}`;
         const created = this.conversations.createSession(project, sessionKey, name);
         await this.conversations.save();
-        return `created session ${created.id} (${created.name})`;
+        return handled(`created session ${created.id} (${created.name})`);
       }
 
       case "list": {
         const active = this.conversations.getOrCreateActiveSession(project, sessionKey);
         const list = this.conversations.listSessions(project, sessionKey);
         if (list.length === 0) {
-          return "no sessions";
+          return handled("no sessions");
         }
-        return list
-          .map((item) => `${item.id === active.id ? "*" : " "} ${item.id}\t${item.name}\t${item.updatedAt}`)
-          .join("\n");
+        return handled(
+          list
+            .map((item) => `${item.id === active.id ? "*" : " "} ${item.id}\t${item.name}\t${item.updatedAt}`)
+            .join("\n"),
+        );
       }
 
       case "switch": {
         const target = parts[1];
         if (!target) {
-          return "usage: /switch <id|name>";
+          return handled("usage: /switch <id|name>");
         }
         const found = this.conversations.switchSession(project, sessionKey, target);
         if (!found) {
-          return `session not found: ${target}`;
+          return handled(`session not found: ${target}`);
         }
         await this.conversations.save();
-        return `active session: ${found.id} (${found.name})`;
+        return handled(`active session: ${found.id} (${found.name})`);
       }
 
       case "mode": {
         if (!hasModeControl(runtime.agent)) {
-          return "this agent does not support mode switching";
+          return handled("this agent does not support mode switching");
         }
         const nextMode = parts[1];
         if (!nextMode) {
-          return `mode=${runtime.agent.getMode()} supported=${runtime.agent.supportedModes().join(",")}`;
+          return handled(`mode=${runtime.agent.getMode()} supported=${runtime.agent.supportedModes().join(",")}`);
         }
         runtime.agent.setMode(nextMode);
-        return `mode updated: ${runtime.agent.getMode()}`;
+        return handled(`mode updated: ${runtime.agent.getMode()}`);
       }
 
-      case "cron": {
-        if (!this.cronScheduler) {
-          return "cron scheduler is not enabled";
+      case "loop": {
+        if (!this.loopScheduler) {
+          return handled("loop scheduler is not enabled");
         }
 
         const sub = (parts[1] ?? "").toLowerCase();
         if (!sub || sub === "help") {
-          return "usage: /cron list | /cron add <expr> <prompt> | /cron del <id>";
+          return handled("usage: /loop <request> | /loop list | /loop add <expr> <prompt> | /loop del <id>");
         }
 
         if (sub === "list") {
-          const jobs = this.cronScheduler
+          const jobs = this.loopScheduler
             .list(project)
             .filter((job) => job.sessionKey === sessionKey)
             .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
           if (jobs.length === 0) {
-            return "no cron jobs";
+            return handled("no loop jobs");
           }
-          return jobs
-            .map((job) => `${job.id}\t${job.cronExpr}\t${job.prompt}\tlastRun=${job.lastRun ?? "-"}`)
-            .join("\n");
+          return handled(
+            jobs
+              .map((job) => `${job.id}\t${job.scheduleExpr}\t${job.prompt}\tlastRun=${job.lastRun ?? "-"}`)
+              .join("\n"),
+          );
         }
 
         if (sub === "add") {
-          const parsed = parseCronAddInput(raw);
+          const parsed = parseLoopAddInput(raw);
           if (!parsed) {
-            return "usage: /cron add <expr> <prompt>";
+            return handled("usage: /loop add <expr> <prompt>");
           }
-          const job = await this.cronScheduler.addJob({
+          const job = await this.loopScheduler.addJob({
             project,
             sessionKey,
-            cronExpr: parsed.cronExpr,
+            scheduleExpr: parsed.scheduleExpr,
             prompt: parsed.prompt,
             description: `chat:${session.id}`,
             silent: false,
           });
-          return `cron created: ${job.id}`;
+          return handled(`loop created: ${job.id}`);
         }
 
         if (sub === "del") {
           const id = parts[2];
           if (!id) {
-            return "usage: /cron del <id>";
+            return handled("usage: /loop del <id>");
           }
-          const removed = await this.cronScheduler.removeJob(id);
-          return removed ? `cron removed: ${id}` : `cron not found: ${id}`;
+          const removed = await this.loopScheduler.removeJob(id);
+          return handled(removed ? `loop removed: ${id}` : `loop not found: ${id}`);
         }
 
-        return `unknown /cron command: ${sub}`;
+        return {
+          kind: "forward_to_agent",
+          prompt: buildLoopCommandPrompt(project, sessionKey, raw.trim().slice("/loop".length).trim()),
+        };
       }
 
       default:
-        return `unknown command: ${command}. use /help`;
+        return handled(`unknown command: ${command}. use /help`);
     }
   }
 }

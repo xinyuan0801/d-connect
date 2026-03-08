@@ -13,7 +13,7 @@ type LogLevel = "debug" | "info" | "warn" | "error";
 export interface InitAnswers {
   projectName: string;
   logLevel: LogLevel;
-  cronSilent: boolean;
+  loopSilent: boolean;
   agentType: AgentType;
   agentCmd: string;
   agentWorkDir: string;
@@ -75,7 +75,7 @@ export function defaultInitAnswers(opts: { cwd?: string } = {}): InitAnswers {
   return {
     projectName: inferProjectNameFromWorkDir(cwd),
     logLevel: "info",
-    cronSilent: false,
+    loopSilent: false,
     agentType: "claudecode",
     agentCmd: "claude",
     agentWorkDir: cwd,
@@ -149,8 +149,8 @@ export function buildConfigFromAnswers(answers: InitAnswers): AppConfig {
     log: {
       level: normalized.logLevel,
     },
-    cron: {
-      silent: normalized.cronSilent,
+    loop: {
+      silent: normalized.loopSilent,
     },
     projects: [
       {

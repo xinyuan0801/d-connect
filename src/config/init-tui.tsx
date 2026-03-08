@@ -236,7 +236,7 @@ function draftToAnswers(draft: WizardDraft, options: RunConfigWizardOptions): In
   return {
     projectName,
     logLevel: asLogLevel(draft.logLevel ?? options.defaults.logLevel),
-    cronSilent: parseBoolean(draft.cronSilent, options.defaults.cronSilent),
+    loopSilent: parseBoolean(draft.loopSilent, options.defaults.loopSilent),
     agentType,
     agentCmd: (draft.agentCmd ?? defaultAgentCommand(agentType)).trim(),
     agentWorkDir,

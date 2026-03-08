@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { AgentAdapter, AgentEvent, AgentSession, DeliveryTarget, InboundMessage, PlatformAdapter } from "../src/runtime/types.js";
 import { Logger } from "../src/logging.js";
+import { createLoopStore, LoopScheduler } from "../src/scheduler/loop.js";
 
 const mockState = vi.hoisted(() => ({
   platformInstances: [] as any[],
@@ -13,6 +14,7 @@ const mockState = vi.hoisted(() => ({
 
 class FakeSession extends EventEmitter implements AgentSession {
   private readonly id: string;
+  public prompts: string[] = [];
 
   constructor(id = "agent-session-1") {
     super();
@@ -20,6 +22,7 @@ class FakeSession extends EventEmitter implements AgentSession {
   }
 
   async send(prompt: string): Promise<void> {
+    this.prompts.push(prompt);
     this.emit("event", {
       type: "text",
       content: `echo:${prompt}`,
@@ -125,7 +128,7 @@ describe("runtime integration", () => {
       configVersion: 1,
       dataDir,
       log: { level: "error" as const },
-      cron: { silent: false },
+      loop: { silent: false },
       projects: [
         {
           name: "demo",
@@ -151,7 +154,9 @@ describe("runtime integration", () => {
       ],
     };
 
-    const runtime = new RuntimeEngine(config, new Logger("error"));
+    const loopStore = await createLoopStore(dataDir);
+    const loopScheduler = new LoopScheduler(loopStore, new Logger("error"));
+    const runtime = new RuntimeEngine(config, new Logger("error"), loopScheduler);
     await runtime.start();
 
     const platform1 = mockState.platformInstances[0];
@@ -188,7 +193,7 @@ describe("runtime integration", () => {
       id: "job-1",
       project: "demo",
       sessionKey: "feishu:chat-1:user-1",
-      cronExpr: "* * * * * *",
+      scheduleExpr: "* * * * * *",
       prompt: "status",
       description: "test",
       enabled: true,
@@ -218,5 +223,60 @@ describe("runtime integration", () => {
     ]);
 
     await restarted.stop();
+  });
+
+  test("routes natural language /loop requests into agent prompts", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "d-connect-runtime-"));
+    const config = {
+      configVersion: 1,
+      dataDir,
+      log: { level: "error" as const },
+      loop: { silent: false },
+      projects: [
+        {
+          name: "demo",
+          agent: {
+            type: "claudecode" as const,
+            options: {
+              cmd: "fake",
+            },
+          },
+          platforms: [
+            {
+              type: "feishu" as const,
+              options: {
+                appId: "app-id",
+                appSecret: "app-secret",
+                allowFrom: "*",
+                groupReplyAll: false,
+                reactionEmoji: "none",
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const loopStore = await createLoopStore(dataDir);
+    const loopScheduler = new LoopScheduler(loopStore, new Logger("error"));
+    const runtime = new RuntimeEngine(config, new Logger("error"), loopScheduler);
+    await runtime.start();
+
+    const result = await runtime.send({
+      project: "demo",
+      sessionKey: "local:alice",
+      content: "/loop 每天早上 9 点提醒我检查构建状态，规则用 0 0 9 * * *",
+    });
+
+    const agent = mockState.agentInstances[0] as FakeAgent | undefined;
+    const session = agent?.sessions[0];
+    expect(session?.prompts).toHaveLength(1);
+    expect(session?.prompts[0]).toContain("d-connect 支持通过命令行添加 loop 任务。");
+    expect(session?.prompts[0]).toContain('d-connect loop add -p "demo" -s "local:alice" -e "<scheduleExpr>" "<prompt>"');
+    expect(session?.prompts[0]).not.toContain("pnpm run dev");
+    expect(session?.prompts[0]).toContain("用户请求：每天早上 9 点提醒我检查构建状态，规则用 0 0 9 * * *");
+    expect(result.response).not.toContain("unknown /loop command");
+
+    await runtime.stop();
   });
 });

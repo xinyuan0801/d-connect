@@ -7,7 +7,7 @@ const logSchema = z
   .strict()
   .default({ level: "info" });
 
-const cronSchema = z
+const loopSchema = z
   .object({
     silent: z.boolean().default(false),
   })
@@ -80,7 +80,7 @@ const projectSchema = z.object({
 export const configSchema = z.object({
   configVersion: z.number().int().positive().default(1),
   log: logSchema,
-  cron: cronSchema,
+  loop: loopSchema,
   projects: z.array(projectSchema).min(1),
 }).strict();
 

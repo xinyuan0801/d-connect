@@ -103,6 +103,7 @@ describe("init config", () => {
 
     const rawFile = await readFile(configPath, "utf8");
     expect(rawFile).not.toContain("\"dataDir\"");
+    expect(rawFile).toContain("\"loop\":");
 
     const parsed = await loadConfig(configPath);
     const resolved = normalizeConfig(parsed, { configPath });

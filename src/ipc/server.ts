@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { createConnection } from "node:net";
 import { unlink } from "node:fs/promises";
-import { CronScheduler } from "../scheduler/cron.js";
+import { LoopScheduler } from "../scheduler/loop.js";
 import { Logger } from "../logging.js";
 import { RuntimeEngine } from "../runtime/engine.js";
 import { createIpcRouter } from "../infra/ipc/router.js";
@@ -9,7 +9,7 @@ import { createIpcRouter } from "../infra/ipc/router.js";
 interface IpcServerOptions {
   socketPath: string;
   runtime: RuntimeEngine;
-  cron: CronScheduler;
+  loop: LoopScheduler;
   logger: Logger;
 }
 
@@ -66,7 +66,7 @@ export class IpcServer {
     await ensureSocketAvailable(this.options.socketPath);
     const router = createIpcRouter({
       runtime: this.options.runtime,
-      cron: this.options.cron,
+      loop: this.options.loop,
       logger: this.options.logger,
     });
 

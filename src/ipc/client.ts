@@ -1,6 +1,6 @@
 import { request } from "node:http";
-import type { CronJob } from "../runtime/types.js";
-import type { CronListResponse, IpcResult, SendResponse } from "./types.js";
+import type { LoopJob } from "../runtime/types.js";
+import type { LoopListResponse, IpcResult, SendResponse } from "./types.js";
 
 async function requestIpc<T>(socketPath: string, method: string, path: string, body?: unknown): Promise<T> {
   const payload = body ? JSON.stringify(body) : "";
@@ -48,18 +48,18 @@ export async function ipcSend(socketPath: string, payload: { project: string; se
   return requestIpc<SendResponse>(socketPath, "POST", "/send", payload);
 }
 
-export async function ipcCronAdd(
+export async function ipcLoopAdd(
   socketPath: string,
-  payload: { project: string; sessionKey: string; cronExpr: string; prompt: string; description?: string; silent?: boolean },
-): Promise<CronJob> {
-  return requestIpc<CronJob>(socketPath, "POST", "/cron/add", payload);
+  payload: { project: string; sessionKey: string; scheduleExpr: string; prompt: string; description?: string; silent?: boolean },
+): Promise<LoopJob> {
+  return requestIpc<LoopJob>(socketPath, "POST", "/loop/add", payload);
 }
 
-export async function ipcCronList(socketPath: string, project?: string): Promise<CronListResponse> {
+export async function ipcLoopList(socketPath: string, project?: string): Promise<LoopListResponse> {
   const suffix = project ? `?project=${encodeURIComponent(project)}` : "";
-  return requestIpc<CronListResponse>(socketPath, "GET", `/cron/list${suffix}`);
+  return requestIpc<LoopListResponse>(socketPath, "GET", `/loop/list${suffix}`);
 }
 
-export async function ipcCronDel(socketPath: string, id: string): Promise<{ deleted: boolean; id: string }> {
-  return requestIpc<{ deleted: boolean; id: string }>(socketPath, "POST", "/cron/del", { id });
+export async function ipcLoopDel(socketPath: string, id: string): Promise<{ deleted: boolean; id: string }> {
+  return requestIpc<{ deleted: boolean; id: string }>(socketPath, "POST", "/loop/del", { id });
 }
