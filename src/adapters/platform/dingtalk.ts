@@ -69,6 +69,7 @@ interface DingTalkRepliedMessage {
     text?: string;
     downloadCode?: string;
     fileName?: string;
+    recognition?: string;
     richText?: DingTalkRichTextPart[];
   };
 }
@@ -141,6 +142,7 @@ interface DownloadCodeCacheEntry {
   spaceId?: string;
   fileId?: string;
   fileName?: string;
+  recognition?: string;
 }
 
 interface PersistedQuotedMediaCache {
@@ -387,6 +389,13 @@ function buildInboundContent(
   return parts.join("\n\n");
 }
 
+function replaceLeadingPrefix(text: string, fromPrefix: string, toPrefix: string): string {
+  if (text.startsWith(fromPrefix)) {
+    return `${toPrefix}${text.slice(fromPrefix.length)}`;
+  }
+  return text;
+}
+
 function parseQuotedInfo(raw: DingTalkInboundMessage): { prefix: string; media?: ParsedMediaAttachment } {
   const textField = raw.text;
   const repliedMsg = textField?.repliedMsg;
@@ -412,18 +421,25 @@ function parseQuotedInfo(raw: DingTalkInboundMessage): { prefix: string; media?:
       };
     }
 
-    if (repliedMsgType === "audio" && content?.downloadCode) {
-      return {
-        prefix: "[引用语音]\n\n",
-        media: {
-          source: "quoted",
-          kind: "audio",
-          downloadCode: content.downloadCode.trim(),
-          fileName: content.fileName?.trim(),
-          quotedMsgId: repliedMsg.msgId?.trim(),
-          quotedCreatedAt: repliedMsg.createdAt,
-        },
-      };
+    if (repliedMsgType === "audio") {
+      const recognition = content?.recognition?.trim();
+      if (recognition) {
+        return { prefix: `[引用语音: "${recognition}"]\n\n` };
+      }
+
+      if (content?.downloadCode) {
+        return {
+          prefix: "[引用语音]\n\n",
+          media: {
+            source: "quoted",
+            kind: "audio",
+            downloadCode: content.downloadCode.trim(),
+            fileName: content.fileName?.trim(),
+            quotedMsgId: repliedMsg.msgId?.trim(),
+            quotedCreatedAt: repliedMsg.createdAt,
+          },
+        };
+      }
     }
 
     if (repliedMsgType === "video" && content?.downloadCode) {
@@ -857,15 +873,118 @@ export class DingTalkAdapter implements PlatformAdapter {
       spaceId: raw.content?.spaceId?.trim(),
       fileId: raw.content?.fileId?.trim(),
       fileName: attachment.fileName,
+      recognition: attachment.kind === "audio" ? raw.content?.recognition?.trim() : undefined,
     });
     this.quotedCache.set(raw.conversationId, bucket);
     await this.saveQuotedCache();
+  }
+
+  private cacheableCurrentAttachment(
+    raw: DingTalkInboundMessage,
+    parsed: ParsedInboundContent,
+  ): ParsedMediaAttachment | undefined {
+    if (parsed.currentMedia) {
+      return parsed.currentMedia;
+    }
+
+    if (raw.msgtype === "audio" && raw.content?.recognition?.trim() && raw.content?.downloadCode?.trim()) {
+      return {
+        source: "current",
+        kind: "audio",
+        downloadCode: raw.content.downloadCode.trim(),
+      };
+    }
+
+    return undefined;
   }
 
   private async findQuotedCacheEntry(conversationId: string, msgId: string): Promise<DownloadCodeCacheEntry | null> {
     await this.ensureQuotedCacheLoaded();
     this.purgeExpiredQuotedCache();
     return this.quotedCache.get(conversationId)?.get(msgId) ?? null;
+  }
+
+  private async findQuotedCacheEntryByCreatedAt(
+    conversationId: string,
+    createdAt: number,
+  ): Promise<DownloadCodeCacheEntry | null> {
+    await this.ensureQuotedCacheLoaded();
+    this.purgeExpiredQuotedCache();
+
+    const bucket = this.quotedCache.get(conversationId);
+    if (!bucket) {
+      return null;
+    }
+
+    let bestMatch: DownloadCodeCacheEntry | null = null;
+    let bestDelta = Infinity;
+
+    for (const entry of bucket.values()) {
+      const delta = Math.abs(entry.createdAt - createdAt);
+      if (delta <= GROUP_FILE_MATCH_WINDOW_MS && delta < bestDelta) {
+        bestDelta = delta;
+        bestMatch = entry;
+      }
+    }
+
+    return bestMatch;
+  }
+
+  private async findBestQuotedCacheEntry(
+    conversationId: string,
+    msgId?: string,
+    createdAt?: number,
+  ): Promise<DownloadCodeCacheEntry | null> {
+    if (msgId) {
+      const directMatch = await this.findQuotedCacheEntry(conversationId, msgId);
+      if (directMatch) {
+        return directMatch;
+      }
+    }
+
+    if (!createdAt) {
+      return null;
+    }
+
+    return this.findQuotedCacheEntryByCreatedAt(conversationId, createdAt);
+  }
+
+  private async enrichQuotedAudioRecognition(
+    raw: DingTalkInboundMessage,
+    parsed: ParsedInboundContent,
+  ): Promise<void> {
+    const repliedMsg = raw.text?.repliedMsg;
+    if (!repliedMsg || !parsed.quotedMedia) {
+      return;
+    }
+
+    const repliedMsgType = repliedMsg.msgType?.trim();
+    if (repliedMsgType !== "unknownMsgType" && repliedMsgType !== "audio") {
+      return;
+    }
+
+    const cached = await this.findBestQuotedCacheEntry(
+      raw.conversationId,
+      repliedMsg.msgId?.trim(),
+      repliedMsg.createdAt,
+    );
+    if (!cached) {
+      return;
+    }
+
+    parsed.quotedMedia.kind = cached.msgType;
+    parsed.quotedMedia.fileName = parsed.quotedMedia.fileName ?? cached.fileName;
+    parsed.quotedMedia.downloadCode = parsed.quotedMedia.downloadCode ?? cached.downloadCode;
+
+    if (cached.msgType !== "audio" || !cached.recognition?.trim()) {
+      return;
+    }
+
+    const fromPrefix = repliedMsgType === "audio" ? "[引用语音]\n\n" : "[引用文件/视频/语音]\n\n";
+    const toPrefix = `[引用语音: "${cached.recognition.trim()}"]\n\n`;
+    parsed.text = replaceLeadingPrefix(parsed.text, fromPrefix, toPrefix).trim();
+    parsed.preview = parsed.text || toPrefix.trim();
+    parsed.quotedMedia = undefined;
   }
 
   private async downloadMediaByDownloadCode(downloadCode: string, robotCode?: string): Promise<DownloadedMediaFile | null> {
@@ -1161,9 +1280,11 @@ export class DingTalkAdapter implements PlatformAdapter {
         return await this.downloadMediaByDownloadCode(attachment.downloadCode, raw.robotCode);
       }
 
-      const cached = attachment.quotedMsgId
-        ? await this.findQuotedCacheEntry(raw.conversationId, attachment.quotedMsgId)
-        : null;
+      const cached = await this.findBestQuotedCacheEntry(
+        raw.conversationId,
+        attachment.quotedMsgId,
+        attachment.quotedCreatedAt,
+      );
       if (cached) {
         attachment.kind = cached.msgType;
         attachment.fileName = attachment.fileName ?? cached.fileName;
@@ -1216,7 +1337,8 @@ export class DingTalkAdapter implements PlatformAdapter {
       return message;
     }
 
-    await this.rememberInboundMedia(raw, parsed.currentMedia);
+    await this.rememberInboundMedia(raw, this.cacheableCurrentAttachment(raw, parsed));
+    await this.enrichQuotedAudioRecognition(raw, parsed);
 
     const currentMediaFile = await this.resolveMediaAttachment(raw, parsed.currentMedia);
     const quotedMediaFile = await this.resolveMediaAttachment(raw, parsed.quotedMedia);
@@ -1238,8 +1360,9 @@ export class DingTalkAdapter implements PlatformAdapter {
     }
 
     const parsed = parseInboundContent(raw);
-    const hasMedia = !!(parsed?.currentMedia || parsed?.quotedMedia);
-    const handlerPromise = hasMedia
+    const cacheableCurrentAttachment = parsed ? this.cacheableCurrentAttachment(raw, parsed) : undefined;
+    const needsResolvedInboundContent = !!(parsed?.currentMedia || parsed?.quotedMedia || cacheableCurrentAttachment);
+    const handlerPromise = needsResolvedInboundContent
       ? (async () => {
           const resolvedMessage = await this.resolveInboundContent(message, raw);
           await this.handler?.(resolvedMessage);

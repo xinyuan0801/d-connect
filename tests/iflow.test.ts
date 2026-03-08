@@ -5,6 +5,7 @@ import {
   recordToolResults,
   readTranscriptDelta,
   shouldFinishByIdleState,
+  shouldFinishByNoResultState,
   type IFlowPendingToolState,
 } from "../src/adapters/agent/iflow.js";
 import { extractAssistantParts } from "../src/adapters/agent/iflow-transcript.js";
@@ -113,6 +114,40 @@ describe("iflow pending tool tracking", () => {
         awaitingPostToolResponse: true,
       }),
     ).toBe(false);
+
+    vi.useRealTimers();
+  });
+
+  test("does not trigger no-result timeout after tool activity", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-07T12:31:09.000Z"));
+
+    expect(
+      shouldFinishByNoResultState({
+        resultChunks: [],
+        pendingTools: new Map(),
+        hadToolActivity: true,
+        awaitingPostToolResponse: true,
+        startedAt: Date.now() - 31000,
+      }),
+    ).toBe(false);
+
+    vi.useRealTimers();
+  });
+
+  test("still triggers no-result timeout when nothing was ever emitted", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-07T12:31:09.000Z"));
+
+    expect(
+      shouldFinishByNoResultState({
+        resultChunks: [],
+        pendingTools: new Map(),
+        hadToolActivity: false,
+        awaitingPostToolResponse: false,
+        startedAt: Date.now() - 31000,
+      }),
+    ).toBe(true);
 
     vi.useRealTimers();
   });

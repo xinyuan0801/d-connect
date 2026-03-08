@@ -597,6 +597,113 @@ describe("dingtalk adapter", () => {
     await expect(readFile(String(imagePath))).resolves.toEqual(Buffer.from(imageBytes));
   });
 
+  test("onDownstream uses quoted audio recognition as context and skips downloading quoted audio", async () => {
+    const adapter = createAdapter();
+    const handler = vi.fn();
+    const fetchMock = vi.fn();
+
+    vi.stubGlobal("fetch", fetchMock);
+    (adapter as any).handler = handler;
+
+    expect(
+      (adapter as any).onDownstream(
+        createDownstream(
+          createRobotMessage({
+            msgId: "quoted-audio-msg",
+            text: {
+              content: "帮我处理这段语音",
+              isReplyMsg: true,
+              repliedMsg: {
+                msgType: "audio",
+                msgId: "quoted-audio-origin",
+                createdAt: Date.now() - 5_000,
+                content: {
+                  recognition: "这是被引用语音的识别文本",
+                  downloadCode: "dl_quote_audio_1",
+                },
+              },
+            },
+          }),
+        ),
+      ),
+    ).toEqual({ status: EventAck.SUCCESS });
+
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining("[引用语音: \"这是被引用语音的识别文本\"]"),
+      }),
+    );
+    expect(handler.mock.calls[0]?.[0]?.content).toContain("帮我处理这段语音");
+    expect(handler.mock.calls[0]?.[0]?.content).not.toContain("[Quoted DingTalk audio]");
+    expect(handler.mock.calls[0]?.[0]?.content).not.toContain("audio_path:");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test("onDownstream uses local audio cache by createdAt for quoted unknownMsgType audio", async () => {
+    const adapter = createAdapter();
+    const handler = vi.fn();
+    const fetchMock = vi.fn();
+    const originalCreatedAt = Date.now();
+
+    vi.stubGlobal("fetch", fetchMock);
+    (adapter as any).handler = handler;
+
+    expect(
+      (adapter as any).onDownstream(
+        createDownstream(
+          createRobotMessage({
+            conversationId: "group-cid",
+            msgId: "origin-audio-msg",
+            createAt: originalCreatedAt,
+            msgtype: "audio",
+            text: undefined,
+            content: {
+              downloadCode: "dl_cached_audio_1",
+              recognition: "缓存里的群聊语音识别",
+            },
+          }),
+        ),
+      ),
+    ).toEqual({ status: EventAck.SUCCESS });
+
+    await waitForAssertion(() => {
+      expect(handler).toHaveBeenCalledTimes(1);
+    });
+
+    handler.mockClear();
+
+    expect(
+      (adapter as any).onDownstream(
+        createDownstream(
+          createRobotMessage({
+            conversationId: "group-cid",
+            msgId: "quoted-unknown-audio-msg",
+            text: {
+              content: "这段语音说了什么",
+              isReplyMsg: true,
+              repliedMsg: {
+                msgType: "unknownMsgType",
+                msgId: "quoted-alias-msg-id",
+                createdAt: originalCreatedAt,
+              },
+            },
+          }),
+        ),
+      ),
+    ).toEqual({ status: EventAck.SUCCESS });
+
+    await waitForAssertion(() => {
+      expect(handler).toHaveBeenCalledTimes(1);
+    });
+
+    const content = String(handler.mock.calls[0]?.[0]?.content);
+    expect(content).toContain("[引用语音: \"缓存里的群聊语音识别\"]");
+    expect(content).toContain("这段语音说了什么");
+    expect(content).not.toContain("[Quoted DingTalk file]");
+    expect(content).not.toContain("media_status: unavailable");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   test("onDownstream resolves quoted unknownMsgType media from local cache first", async () => {
     const inboundMediaDir = await mkdtemp(join(tmpdir(), "d-connect-dingtalk-"));
     tempDirs.push(inboundMediaDir);

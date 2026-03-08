@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import type { ResolvedProjectConfig } from "../../config/normalize.js";
 import { Logger } from "../../logging.js";
 import type { PlatformAdapter } from "../../core/types.js";
@@ -9,7 +10,16 @@ export function createPlatformAdapters(project: ResolvedProjectConfig, logger: L
   for (const platform of project.platforms) {
     switch (platform.type) {
       case "dingtalk": {
-        adapters.push(new DingTalkAdapter(platform.options as DingTalkOptions, logger.child(`platform:${platform.type}`)));
+        const options: DingTalkOptions = {
+          ...(platform.options as DingTalkOptions),
+        };
+        if (!options.inboundMediaDir) {
+          const workDir = project.agent.options.workDir?.trim();
+          if (workDir) {
+            options.inboundMediaDir = join(workDir, ".d-connect", "dingtalk-media");
+          }
+        }
+        adapters.push(new DingTalkAdapter(options, logger.child(`platform:${platform.type}`)));
         break;
       }
       case "feishu": {

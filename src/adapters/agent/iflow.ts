@@ -164,6 +164,25 @@ export function shouldFinishByIdleState(state: {
   return Date.now() - state.lastActivityAt >= idleMs;
 }
 
+export function shouldFinishByNoResultState(
+  state: {
+    resultChunks: string[];
+    pendingTools: Map<string, string>;
+    hadToolActivity: boolean;
+    awaitingPostToolResponse: boolean;
+    startedAt: number;
+  },
+  now = Date.now(),
+): boolean {
+  if (state.resultChunks.length > 0 || state.pendingTools.size > 0) {
+    return false;
+  }
+  if (state.hadToolActivity || state.awaitingPostToolResponse) {
+    return false;
+  }
+  return now - state.startedAt >= TURN_NO_RESULT_TIMEOUT_MS;
+}
+
 function safeJsonParse<T>(line: string): T | null {
   try {
     return JSON.parse(line) as T;
@@ -307,11 +326,6 @@ class IFlowSession extends EventEmitter implements AgentSession {
     }
   }
 
-  private resetConversationState(): void {
-    this.agentSessionId = "";
-    this.sentOnce = false;
-  }
-
   private emitAgentEvent(event: AgentEvent): void {
     const effectiveSessionId = this.currentSessionId();
     const nextEvent =
@@ -450,10 +464,7 @@ class IFlowSession extends EventEmitter implements AgentSession {
   }
 
   private shouldFinishByNoResultTimeout(turn: TurnState): boolean {
-    if (turn.resultChunks.length > 0 || turn.pendingTools.size > 0) {
-      return false;
-    }
-    if (Date.now() - turn.startedAt < TURN_NO_RESULT_TIMEOUT_MS) {
+    if (!shouldFinishByNoResultState(turn)) {
       return false;
     }
     turn.resultChunks.push("iflow did not produce transcript output in time");
@@ -603,15 +614,12 @@ class IFlowSession extends EventEmitter implements AgentSession {
       const result = await Promise.race([this.waitForTurnResult(child, turn), spawnError]);
       await this.loadNewTranscript(turn);
 
-      let conversationReset = false;
       if (turn.awaitingPostToolResponse) {
-        turn.resultChunks.push("iflow 在工具执行后结束了当前轮次，但没有产出最终回复；已重置底层会话。");
-        this.resetConversationState();
-        conversationReset = true;
+        turn.resultChunks.push("iflow 在工具执行后结束了当前轮次，但没有产出最终回复；已保留底层续聊状态。");
       }
 
       const response = normalizeWhitespace(turn.resultChunks.join("\n\n"));
-      this.sentOnce = !conversationReset;
+      this.sentOnce = true;
 
       if (response.length > 0) {
         this.emitAgentEvent({
