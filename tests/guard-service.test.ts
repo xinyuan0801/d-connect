@@ -18,9 +18,9 @@ describe("guard service helpers", () => {
   });
 
   test("parseGuardDecision accepts direct json and fenced json", () => {
-    expect(parseGuardDecision('{"action":"allow","reason":"安全"}')).toEqual({
+    expect(parseGuardDecision('{"action":"allow"}')).toEqual({
       action: "allow",
-      reason: "安全",
+      reason: "",
     });
 
     expect(
