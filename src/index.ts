@@ -1,6 +1,6 @@
-#!/usr/bin/env node
 import { join } from "node:path";
 import { Command } from "commander";
+import { initConfig } from "./config/index.js";
 import { ipcCronAdd, ipcCronDel, ipcCronList, ipcSend } from "./ipc/client.js";
 import { resolveAndLoadConfig, startApp } from "./app.js";
 
@@ -26,6 +26,22 @@ program
   .option("-c, --config <path>", "Path to config.json")
   .action(async (opts: { config?: string }) => {
     await startApp({ explicitConfigPath: opts.config });
+  });
+
+program
+  .command("init")
+  .description("Create config.json with interactive wizard")
+  .option("-c, --config <path>", "Path to config.json")
+  .option("-f, --force", "Overwrite existing config file")
+  .option("-y, --yes", "Use defaults and skip interactive prompts")
+  .action(async (opts: { config?: string; force?: boolean; yes?: boolean }) => {
+    const result = await initConfig({
+      explicitConfigPath: opts.config,
+      force: Boolean(opts.force),
+      yes: Boolean(opts.yes),
+    });
+    const operation = result.overwritten ? "updated" : "created";
+    console.log(`config ${operation} at ${result.configPath}`);
   });
 
 program

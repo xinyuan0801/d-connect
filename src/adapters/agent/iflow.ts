@@ -14,7 +14,7 @@ import type {
   ModeSwitchable,
   PermissionResult,
 } from "../../runtime/types.js";
-import type { BaseAgentOptions } from "./base-cli.js";
+import type { BaseAgentOptions } from "./options.js";
 import {
   extractAssistantParts,
   extractToolResults,
@@ -190,18 +190,42 @@ function shellQuote(input: string): string {
   return `'${input.replace(/'/g, `'"'"'`)}'`;
 }
 
+function resolveScriptCommand(pathEnv = process.env.PATH): string | undefined {
+  const commonBins = ["/usr/bin/script", "/bin/script", "/usr/local/bin/script"];
+  for (const candidate of commonBins) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  const fallbackPaths = (pathEnv || "")
+    .split(":")
+    .filter(Boolean)
+    .concat("/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin")
+    .map((dir) => join(dir, "script"));
+  for (const candidate of fallbackPaths) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return undefined;
+}
+
 function buildPtyWrapper(cmd: string, args: string[]): { command: string; args: string[] } {
-  if (process.platform === "linux") {
+  const scriptCommand = resolveScriptCommand();
+
+  if (process.platform === "linux" && scriptCommand) {
     const commandString = [cmd, ...args].map(shellQuote).join(" ");
     return {
-      command: "script",
+      command: scriptCommand,
       args: ["-q", "-e", "-c", commandString, "/dev/null"],
     };
   }
 
-  if (process.platform === "darwin") {
+  if (process.platform === "darwin" && scriptCommand) {
     return {
-      command: "script",
+      command: scriptCommand,
       args: ["-q", "/dev/null", cmd, ...args],
     };
   }
@@ -563,6 +587,11 @@ class IFlowSession extends EventEmitter implements AgentSession {
         env: this.adapter.spawnEnv(),
         stdio: ["ignore", "pipe", "pipe"],
       });
+      const spawnError = new Promise<never>((_, reject) => {
+        child.once("error", (error) => {
+          reject(new Error(`failed to spawn iflow process: ${error.message}`));
+        });
+      });
 
       child.stdout.on("data", (chunk: Buffer) => {
         stdoutTail = appendLimited(stdoutTail, chunk.toString("utf8"));
@@ -571,7 +600,7 @@ class IFlowSession extends EventEmitter implements AgentSession {
         stderrTail = appendLimited(stderrTail, chunk.toString("utf8"));
       });
 
-      const result = await this.waitForTurnResult(child, turn);
+      const result = await Promise.race([this.waitForTurnResult(child, turn), spawnError]);
       await this.loadNewTranscript(turn);
 
       let conversationReset = false;

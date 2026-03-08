@@ -15,9 +15,9 @@ function validConfigJson(dataDir: string): string {
         {
           name: "p1",
           agent: {
-            type: "codex",
+            type: "qoder",
             options: {
-              cmd: "codex",
+              cmd: "qodercli",
             },
           },
           platforms: [
@@ -74,7 +74,7 @@ describe("config loader", () => {
     const cfg = await loadConfig(path);
     expect(cfg.configVersion).toBe(1);
     expect(cfg.projects).toHaveLength(1);
-    expect(cfg.projects[0]?.agent.type).toBe("codex");
+    expect(cfg.projects[0]?.agent.type).toBe("qoder");
   });
 
   test("loadConfig supports feishu platform", async () => {

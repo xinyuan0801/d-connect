@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { parseAgentLine } from "../src/adapters/agent/parsers.js";
 
-const agents = ["claudecode", "codex", "qoder", "opencode", "iflow"];
+const agents = ["claudecode", "qoder", "iflow"];
 
 describe("agent parser normalization", () => {
   test.each(agents)("%s parses structured json result", (agent) => {

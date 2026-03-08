@@ -15,7 +15,7 @@ const cronSchema = z
   .default({ silent: false });
 
 const agentSchema = z.object({
-  type: z.enum(["claudecode", "codex", "qoder", "opencode", "iflow"]),
+  type: z.enum(["claudecode", "qoder", "iflow"]),
   options: z.record(z.string(), z.unknown()).default({}),
 }).strict();
 

@@ -2,11 +2,9 @@ import { Logger } from "../../logging.js";
 import type { AgentAdapter } from "../../runtime/types.js";
 import type { ProjectConfig } from "../../config/schema.js";
 import { createClaudeCodeAdapter } from "./claudecode.js";
-import { createCodexAdapter } from "./codex.js";
 import { createQoderAdapter } from "./qoder.js";
-import { createOpenCodeAdapter } from "./opencode.js";
 import { createIFlowAdapter } from "./iflow.js";
-import type { BaseAgentOptions } from "./base-cli.js";
+import type { BaseAgentOptions } from "./options.js";
 
 function toBaseOptions(value: Record<string, unknown>): BaseAgentOptions {
   const options: BaseAgentOptions = {};
@@ -40,12 +38,8 @@ export function createAgentAdapter(project: ProjectConfig, logger: Logger): Agen
   switch (project.agent.type) {
     case "claudecode":
       return createClaudeCodeAdapter(options, logger);
-    case "codex":
-      return createCodexAdapter(options, logger);
     case "qoder":
       return createQoderAdapter(options, logger);
-    case "opencode":
-      return createOpenCodeAdapter(options, logger);
     case "iflow":
       return createIFlowAdapter(options, logger);
     default:
@@ -53,5 +47,5 @@ export function createAgentAdapter(project: ProjectConfig, logger: Logger): Agen
   }
 }
 
-export * from "./base-cli.js";
+export * from "./options.js";
 export * from "./parsers.js";

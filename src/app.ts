@@ -16,7 +16,9 @@ export async function resolveAndLoadConfig(explicitConfigPath?: string) {
 
   if (!exists) {
     await bootstrapConfig(configPath);
-    throw new Error(`config file created at ${configPath}; please edit it before starting d-connect`);
+    throw new Error(
+      `config file created at ${configPath}; edit it before starting d-connect, or run "d-connect init -c ${configPath} --force"`,
+    );
   }
 
   const config = await loadConfig(configPath);

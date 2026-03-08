@@ -10,7 +10,7 @@ import type {
   ModeSwitchable,
   PermissionResult,
 } from "../../runtime/types.js";
-import type { BaseAgentOptions } from "./base-cli.js";
+import type { BaseAgentOptions } from "./options.js";
 
 type RawRecord = Record<string, unknown>;
 

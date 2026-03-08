@@ -5,7 +5,7 @@ import {
   parseAgentLine,
 } from "./parsers.js";
 import type { AgentAdapter, AgentEvent, AgentSession, ModelSwitchable, ModeSwitchable, PermissionResult } from "../../runtime/types.js";
-import type { BaseAgentOptions } from "./base-cli.js";
+import type { BaseAgentOptions } from "./options.js";
 
 type RawRecord = Record<string, unknown>;
 

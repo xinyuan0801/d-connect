@@ -10,7 +10,7 @@
 - 运行时：Node.js `>=22`
 - 模块系统：ESM（`tsconfig.json` 使用 `NodeNext`）
 - 测试：Vitest
-- 包管理：仓库当前使用 `npm`（存在 `package-lock.json`）
+- 包管理：仓库当前使用 `pnpm`（存在 `pnpm-lock.yaml`）
 
 重要约束：
 
@@ -21,24 +21,26 @@
 ## 常用命令
 
 ```bash
-npm install
-npm run build
-npm test
-npm run dev -- start -c ./config.json
+pnpm install
+pnpm run build
+pnpm test
+pnpm run dev init -c ./config.json
+pnpm run dev start -c ./config.json
+node dist/index.js init -c ./config.json
 node dist/index.js start -c ./config.json
 ```
 
 常见本地联调：
 
 ```bash
-npm run dev -- send -p <project> -s local:debug "hello"
-npm run dev -- cron add -p <project> -s local:debug -e "*/30 * * * * *" "status"
-npm run dev -- cron list -p <project>
+pnpm run dev send -p <project> -s local:debug "hello"
+pnpm run dev cron add -p <project> -s local:debug -e "*/30 * * * * *" "status"
+pnpm run dev cron list -p <project>
 ```
 
 ## 目录结构
 
-- `src/index.ts`：CLI 入口，定义 `start`、`send`、`cron` 命令。
+- `src/index.ts`：CLI 入口，定义 `init`、`start`、`send`、`cron` 命令。
 - `src/app.ts`：应用启动编排，负责加载配置、初始化日志、runtime、IPC、cron。
 - `src/config/**`：配置路径解析、模板生成、Zod schema 校验。
 - `src/runtime/**`：核心运行时，负责项目实例、会话缓存、消息收发、事件格式化。
@@ -93,8 +95,8 @@ npm run dev -- cron list -p <project>
 提交前至少运行与改动相关的测试；如果改动了公共运行路径，优先跑全量：
 
 ```bash
-npm test
-npm run build
+pnpm test
+pnpm run build
 ```
 
 涉及以下改动时，测试不要省：
@@ -108,7 +110,7 @@ npm run build
 
 ## 调试提示
 
-- 若配置文件不存在，`start` 会自动生成模板并退出，这是预期行为。
+- 建议先执行 `init` 生成配置；若配置文件不存在，`start` 仍会自动生成模板并退出。
 - 本地调试优先使用 `local:<name>` 这样的 `sessionKey`，先验证 runtime/IPC/cron，再接入真实 IM。
 - 守护进程依赖 `dataDir/ipc.sock`；排查 IPC 问题时先确认 `start` 是否已成功启动。
 - 若看到 `session is busy`，说明同一会话仍在处理上一条请求，不要把它误判为进程卡死。
@@ -120,3 +122,4 @@ npm run build
 - 不要引入新的框架级依赖，除非确有必要且与当前架构一致。
 - 若用户要求只是补文档或配置说明，避免顺带修改业务逻辑。
 - 若改动影响用户可见命令、配置字段或平台行为，同时更新 `README.md`。
+- 在开发过程中，若发现有意义的重要链路（如关键调用链、排障路径、联调步骤），允许并建议同步更新 `AGENTS.md` 进行沉淀，且内容需与当前实现保持一致。
