@@ -1,10 +1,27 @@
 import { join } from "node:path";
 import { Command } from "commander";
-import { addProjectConfig, initConfig } from "../config/index.js";
+import { addProjectConfig, initConfig, resolveConfigPathByProject } from "../config/index.js";
 import { ipcLoopAdd, ipcLoopDel, ipcLoopList, ipcSend } from "../ipc/client.js";
 import { resolveAndLoadConfig, startDaemon } from "./daemon.js";
 
-async function resolveSocketPath(configPath?: string): Promise<string> {
+function formatConfigCandidates(paths: string[]): string {
+  return paths.map((path) => `"${path}"`).join(", ");
+}
+
+async function resolveSocketPath(options: { configPath?: string; projectName?: string } = {}): Promise<string> {
+  let configPath = options.configPath;
+
+  if (!configPath && options.projectName) {
+    const resolution = await resolveConfigPathByProject(options.projectName);
+    if (resolution.status === "matched") {
+      configPath = resolution.path;
+    } else if (resolution.status === "ambiguous" && resolution.candidates) {
+      throw new Error(
+        `multiple config files contain project "${options.projectName}": ${formatConfigCandidates(resolution.candidates)}; pass -c to choose one`,
+      );
+    }
+  }
+
   const { config } = await resolveAndLoadConfig(configPath);
   return join(config.dataDir, "ipc.sock");
 }
@@ -66,7 +83,10 @@ export function createCliProgram(): Command {
     .option("-c, --config <path>", "Path to config.json")
     .argument("<content...>", "Message content")
     .action(async (contentArgs: string[], opts: { project: string; sessionKey: string; config?: string }) => {
-      const socketPath = await resolveSocketPath(opts.config);
+      const socketPath = await resolveSocketPath({
+        configPath: opts.config,
+        projectName: opts.project,
+      });
       const content = contentArgs.join(" ").trim();
       const result = await ipcSend(socketPath, {
         project: opts.project,
@@ -93,7 +113,10 @@ export function createCliProgram(): Command {
         promptArgs: string[],
         opts: { project: string; sessionKey: string; expr: string; description: string; silent?: boolean; config?: string },
       ) => {
-        const socketPath = await resolveSocketPath(opts.config);
+        const socketPath = await resolveSocketPath({
+          configPath: opts.config,
+          projectName: opts.project,
+        });
         const prompt = promptArgs.join(" ").trim();
         const job = await ipcLoopAdd(socketPath, {
           project: opts.project,
@@ -113,7 +136,10 @@ export function createCliProgram(): Command {
     .option("-p, --project <name>", "Project name")
     .option("-c, --config <path>", "Path to config.json")
     .action(async (opts: { project?: string; config?: string }) => {
-      const socketPath = await resolveSocketPath(opts.config);
+      const socketPath = await resolveSocketPath({
+        configPath: opts.config,
+        projectName: opts.project,
+      });
       const result = await ipcLoopList(socketPath, opts.project);
       for (const job of result.jobs) {
         console.log(`${job.id}\t${job.project}\t${job.sessionKey}\t${job.scheduleExpr}\t${job.prompt}`);
@@ -126,7 +152,7 @@ export function createCliProgram(): Command {
     .requiredOption("-i, --id <id>", "Loop job id")
     .option("-c, --config <path>", "Path to config.json")
     .action(async (opts: { id: string; config?: string }) => {
-      const socketPath = await resolveSocketPath(opts.config);
+      const socketPath = await resolveSocketPath({ configPath: opts.config });
       const result = await ipcLoopDel(socketPath, opts.id);
       if (!result.deleted) {
         throw new Error(`loop job not found: ${opts.id}`);

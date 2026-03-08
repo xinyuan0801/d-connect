@@ -1,18 +1,8 @@
-import type { ModeSwitchable } from "../core/types.js";
 import type { ProjectRuntime } from "./project-registry.js";
 import type { SessionRecord } from "./session-repository.js";
 import { ConversationService } from "./conversation-service.js";
 import { LoopScheduler } from "../scheduler/loop.js";
 import cron from "node-cron";
-
-function hasModeControl(agent: ProjectRuntime["agent"]): agent is ProjectRuntime["agent"] & ModeSwitchable {
-  const candidate = agent as Partial<ModeSwitchable>;
-  return (
-    typeof candidate.setMode === "function" &&
-    typeof candidate.getMode === "function" &&
-    typeof candidate.supportedModes === "function"
-  );
-}
 
 export interface CommandContext {
   runtime: ProjectRuntime;
@@ -64,13 +54,19 @@ function buildLoopCommandPrompt(project: string, sessionKey: string, request: st
   const quotedSessionKey = JSON.stringify(sessionKey);
 
   return [
-    "用户想创建一个 d-connect loop 任务。",
-    "d-connect 支持通过命令行添加 loop 任务。",
+    "用户想通过自然语言管理 d-connect loop 任务（新增/查看/删除）。",
+    "d-connect 支持通过命令行管理 loop 任务。",
     `当前 project: ${project}`,
     `当前 sessionKey: ${sessionKey}`,
-    "请根据下面的请求整理合适的调度表达式和任务 prompt，并优先直接使用命令行创建任务。",
-    `可用命令：d-connect loop add -p ${quotedProject} -s ${quotedSessionKey} -e \"<scheduleExpr>\" \"<prompt>\"`,
-    "如果用户请求里已经给出了调度规则，直接使用；如果信息不足，再向用户确认。",
+    "请根据下面的请求判断应执行 add/list/del 哪个命令，并优先直接执行命令。",
+    `可用命令(add)：d-connect loop add -p ${quotedProject} -s ${quotedSessionKey} -e "<scheduleExpr>" "<prompt>"`,
+    `可用命令(list)：d-connect loop list -p ${quotedProject}`,
+    "可用命令(del)：d-connect loop del -i \"<jobId>\" -c <configPath>",
+    "当用户要求删除但未提供 jobId 时，先执行 list，再基于用户确认的 jobId 执行 del。",
+    "重要：`<prompt>` 只能写任务动作本身，不能包含任何时间/频率/cron 信息（例如“每天、每周、8点22分、22 20 * * *”）。",
+    "调度信息只放在 `-e`，`<prompt>` 只保留可执行动作。",
+    `示例：用户请求“每天晚上8点22介绍一下自己” -> d-connect loop add -p ${quotedProject} -s ${quotedSessionKey} -e "22 20 * * *" "介绍一下自己"`,
+    "如果无法准确区分调度和任务动作，再向用户确认。",
     `用户请求：${request}`,
   ].join("\n");
 }
@@ -82,7 +78,7 @@ export class CommandService {
   ) {}
 
   async handle(context: CommandContext): Promise<CommandResult> {
-    const { runtime, project, sessionKey, session, raw } = context;
+    const { project, sessionKey, session, raw } = context;
     const parts = raw.trim().slice(1).split(/\s+/);
     const command = (parts[0] ?? "").toLowerCase();
 
@@ -94,7 +90,6 @@ export class CommandService {
           "/new [name]",
           "/list",
           "/switch <id|name>",
-          "/mode [name]",
           "/loop <request>",
           "/loop list",
           "/loop add <expr> <prompt>",
@@ -132,18 +127,6 @@ export class CommandService {
         }
         await this.conversations.save();
         return handled(`active session: ${found.id} (${found.name})`);
-      }
-
-      case "mode": {
-        if (!hasModeControl(runtime.agent)) {
-          return handled("this agent does not support mode switching");
-        }
-        const nextMode = parts[1];
-        if (!nextMode) {
-          return handled(`mode=${runtime.agent.getMode()} supported=${runtime.agent.supportedModes().join(",")}`);
-        }
-        runtime.agent.setMode(nextMode);
-        return handled(`mode updated: ${runtime.agent.getMode()}`);
       }
 
       case "loop": {

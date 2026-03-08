@@ -2,7 +2,7 @@ import { mkdtemp, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { loadConfig, normalizeConfig, resolveConfigPath } from "../src/config/index.js";
+import { loadConfig, normalizeConfig, resolveConfigPath, resolveConfigPathByProject } from "../src/config/index.js";
 
 function validConfigJson(): string {
   return JSON.stringify(
@@ -63,6 +63,92 @@ describe("config loader", () => {
     const noLocalCwd = join(root, "workspace2");
     await mkdir(noLocalCwd, { recursive: true });
     expect(resolveConfigPath(undefined, { cwd: noLocalCwd, homeDir: home })).toBe(homeConfig);
+  });
+
+  test("resolveConfigPathByProject finds unique local config.<name>.json", async () => {
+    const root = await mkdtemp(join(tmpdir(), "d-connect-config-"));
+    const cwd = join(root, "workspace");
+    const home = join(root, "home");
+    await mkdir(cwd, { recursive: true });
+    await mkdir(home, { recursive: true });
+
+    const payload = JSON.parse(validConfigJson());
+    payload.projects[0].name = "claudecode-dingtalk";
+    const localConfig = join(cwd, "config.claudecode-dingtalk.local.json");
+    await writeFile(localConfig, `${JSON.stringify(payload)}\n`, "utf8");
+
+    const result = await resolveConfigPathByProject("claudecode-dingtalk", { cwd, homeDir: home });
+    expect(result).toEqual({
+      status: "matched",
+      path: localConfig,
+    });
+  });
+
+  test("resolveConfigPathByProject prefers cwd config over home config when both match", async () => {
+    const root = await mkdtemp(join(tmpdir(), "d-connect-config-"));
+    const cwd = join(root, "workspace");
+    const home = join(root, "home");
+    await mkdir(cwd, { recursive: true });
+    await mkdir(join(home, ".d-connect"), { recursive: true });
+
+    const payload = JSON.parse(validConfigJson());
+    payload.projects[0].name = "shared-project";
+
+    const localConfig = join(cwd, "config.shared.local.json");
+    const homeConfig = join(home, ".d-connect", "config.json");
+    await writeFile(localConfig, `${JSON.stringify(payload)}\n`, "utf8");
+    await writeFile(homeConfig, `${JSON.stringify(payload)}\n`, "utf8");
+
+    const result = await resolveConfigPathByProject("shared-project", { cwd, homeDir: home });
+    expect(result).toEqual({
+      status: "matched",
+      path: localConfig,
+    });
+  });
+
+  test("resolveConfigPathByProject reports ambiguity with multiple local matches", async () => {
+    const root = await mkdtemp(join(tmpdir(), "d-connect-config-"));
+    const cwd = join(root, "workspace");
+    const home = join(root, "home");
+    await mkdir(cwd, { recursive: true });
+    await mkdir(home, { recursive: true });
+
+    const payloadA = JSON.parse(validConfigJson());
+    payloadA.projects[0].name = "dup-project";
+    const payloadB = JSON.parse(validConfigJson());
+    payloadB.projects[0].name = "dup-project";
+
+    const configA = join(cwd, "config.a.json");
+    const configB = join(cwd, "config.b.json");
+    await writeFile(configA, `${JSON.stringify(payloadA)}\n`, "utf8");
+    await writeFile(configB, `${JSON.stringify(payloadB)}\n`, "utf8");
+
+    const result = await resolveConfigPathByProject("dup-project", { cwd, homeDir: home });
+    expect(result).toEqual({
+      status: "ambiguous",
+      candidates: [configA, configB],
+    });
+  });
+
+  test("resolveConfigPathByProject ignores invalid json files", async () => {
+    const root = await mkdtemp(join(tmpdir(), "d-connect-config-"));
+    const cwd = join(root, "workspace");
+    const home = join(root, "home");
+    await mkdir(cwd, { recursive: true });
+    await mkdir(home, { recursive: true });
+
+    await writeFile(join(cwd, "config.invalid.json"), "{not valid json}\n", "utf8");
+
+    const payload = JSON.parse(validConfigJson());
+    payload.projects[0].name = "valid-only";
+    const goodConfig = join(cwd, "config.valid.json");
+    await writeFile(goodConfig, `${JSON.stringify(payload)}\n`, "utf8");
+
+    const result = await resolveConfigPathByProject("valid-only", { cwd, homeDir: home });
+    expect(result).toEqual({
+      status: "matched",
+      path: goodConfig,
+    });
   });
 
   test("loadConfig parses valid json and defaults", async () => {
@@ -134,6 +220,25 @@ describe("config loader", () => {
     await writeFile(path, `${JSON.stringify(payload)}\n`, "utf8");
 
     await expect(loadConfig(path)).rejects.toThrow(/duplicate project name/i);
+  });
+
+  test("loadConfig still accepts legacy agent mode fields", async () => {
+    const root = await mkdtemp(join(tmpdir(), "d-connect-config-"));
+    const path = join(root, "config.json");
+    const payload = JSON.parse(validConfigJson());
+    payload.projects[0].agent.type = "iflow";
+    payload.projects[0].agent.options = {
+      cmd: "iflow",
+      workDir: "/repo",
+      mode: "plan",
+    };
+    await writeFile(path, `${JSON.stringify(payload)}\n`, "utf8");
+
+    const cfg = await loadConfig(path);
+    expect(cfg.projects[0]?.agent.options).toMatchObject({
+      workDir: "/repo",
+      mode: "plan",
+    });
   });
 
   test("normalizeConfig keeps typed agent fields and passthrough extras", async () => {

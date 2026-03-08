@@ -7,12 +7,11 @@ import { createSessionStore } from "../src/runtime/session-store.js";
 import { createLoopStore, LoopScheduler } from "../src/scheduler/loop.js";
 import { ConversationService } from "../src/services/conversation-service.js";
 import { CommandService, type CommandResult } from "../src/services/command-service.js";
-import type { AgentAdapter, AgentSession, ModeSwitchable } from "../src/runtime/types.js";
+import type { AgentAdapter, AgentSession } from "../src/runtime/types.js";
 import type { ProjectRuntime } from "../src/services/project-registry.js";
 
-class FakeAgent implements AgentAdapter, ModeSwitchable {
+class FakeAgent implements AgentAdapter {
   readonly name = "fake";
-  private mode = "default";
 
   async startSession(): Promise<AgentSession> {
     throw new Error("not used");
@@ -20,18 +19,6 @@ class FakeAgent implements AgentAdapter, ModeSwitchable {
 
   async stop(): Promise<void> {
     // noop
-  }
-
-  setMode(mode: string): void {
-    this.mode = mode;
-  }
-
-  getMode(): string {
-    return this.mode;
-  }
-
-  supportedModes(): string[] {
-    return ["default", "plan"];
   }
 }
 
@@ -74,7 +61,7 @@ function expectHandled(result: CommandResult): string {
 }
 
 describe("command service", () => {
-  test("handles session lifecycle and mode switching", async () => {
+  test("handles session lifecycle without exposing mode commands", async () => {
     const { service, conversation, runtime } = await createHarness();
     const session = conversation.getOrCreateActiveSession("demo", "local:alice");
 
@@ -118,9 +105,9 @@ describe("command service", () => {
         project: "demo",
         sessionKey: "local:alice",
         session,
-        raw: "/mode",
+        raw: "/help",
       })),
-    ).toContain("supported=default,plan");
+    ).not.toContain("/mode");
 
     expect(
       expectHandled(await service.handle({
@@ -128,9 +115,9 @@ describe("command service", () => {
         project: "demo",
         sessionKey: "local:alice",
         session,
-        raw: "/mode plan",
+        raw: "/mode",
       })),
-    ).toBe("mode updated: plan");
+    ).toBe("unknown command: mode. use /help");
   });
 
   test("handles loop add/list/del through command registry", async () => {
@@ -183,11 +170,15 @@ describe("command service", () => {
 
     expect(result).toEqual({
       kind: "forward_to_agent",
-      prompt: expect.stringContaining("d-connect 支持通过命令行添加 loop 任务。"),
+      prompt: expect.stringContaining("d-connect 支持通过命令行管理 loop 任务。"),
     });
     expect(result.kind).toBe("forward_to_agent");
     if (result.kind === "forward_to_agent") {
       expect(result.prompt).toContain('d-connect loop add -p "demo" -s "local:alice" -e "<scheduleExpr>" "<prompt>"');
+      expect(result.prompt).toContain('d-connect loop list -p "demo"');
+      expect(result.prompt).toContain('d-connect loop del -i "<jobId>" -c <configPath>');
+      expect(result.prompt).toContain("`<prompt>` 只能写任务动作本身");
+      expect(result.prompt).toContain('示例：用户请求“每天晚上8点22介绍一下自己” -> d-connect loop add -p "demo" -s "local:alice" -e "22 20 * * *" "介绍一下自己"');
       expect(result.prompt).not.toContain("pnpm run dev");
       expect(result.prompt).toContain("用户请求：每天早上 9 点提醒我检查构建状态，规则用 0 0 9 * * *");
     }

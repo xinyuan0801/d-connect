@@ -1,4 +1,4 @@
-import { access, readFile, writeFile } from "node:fs/promises";
+import { access, readFile, readdir, writeFile } from "node:fs/promises";
 import { constants, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
@@ -9,6 +9,92 @@ import { ensureDir } from "../infra/store-json/atomic.js";
 export interface ResolvePathOptions {
   cwd?: string;
   homeDir?: string;
+}
+
+export interface ResolveConfigPathByProjectResult {
+  status: "matched" | "not_found" | "ambiguous";
+  path?: string;
+  candidates?: string[];
+}
+
+function isConfigFileName(name: string): boolean {
+  return /^config(?:\..+)?\.json$/u.test(name);
+}
+
+async function listConfigCandidates(cwd: string, homeDir: string): Promise<string[]> {
+  const candidates = new Set<string>();
+  candidates.add(join(cwd, "config.json"));
+
+  try {
+    const entries = await readdir(cwd, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isFile() || !isConfigFileName(entry.name)) {
+        continue;
+      }
+      candidates.add(join(cwd, entry.name));
+    }
+  } catch {
+    // ignore
+  }
+
+  candidates.add(join(homeDir, ".d-connect", "config.json"));
+  return Array.from(candidates);
+}
+
+export async function resolveConfigPathByProject(
+  projectName: string,
+  opts: ResolvePathOptions = {},
+): Promise<ResolveConfigPathByProjectResult> {
+  const cwd = opts.cwd ?? process.cwd();
+  const homeDir = opts.homeDir ?? homedir();
+  const candidates = await listConfigCandidates(cwd, homeDir);
+  const matches: string[] = [];
+
+  for (const candidate of candidates) {
+    if (!(await fileExists(candidate))) {
+      continue;
+    }
+
+    try {
+      const config = await loadConfig(candidate);
+      if (config.projects.some((project) => project.name === projectName)) {
+        matches.push(candidate);
+      }
+    } catch {
+      // ignore non-d-connect or invalid config files while probing candidates
+    }
+  }
+
+  if (matches.length === 0) {
+    return {
+      status: "not_found",
+    };
+  }
+
+  const localMatches = matches.filter((path) => dirname(path) === cwd);
+  if (localMatches.length === 1) {
+    return {
+      status: "matched",
+      path: localMatches[0],
+    };
+  }
+  if (localMatches.length > 1) {
+    return {
+      status: "ambiguous",
+      candidates: localMatches,
+    };
+  }
+  if (matches.length === 1) {
+    return {
+      status: "matched",
+      path: matches[0],
+    };
+  }
+
+  return {
+    status: "ambiguous",
+    candidates: matches,
+  };
 }
 
 export function resolveConfigPath(explicitPath?: string, opts: ResolvePathOptions = {}): string {
@@ -54,7 +140,6 @@ function defaultConfigTemplate(): AppConfig {
           type: "claudecode",
           options: {
             workDir: "/path/to/repo",
-            mode: "default",
             model: "claude-sonnet-4-20250514",
             cmd: "claude",
           },

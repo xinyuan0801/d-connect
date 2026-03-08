@@ -295,8 +295,11 @@ describe("runtime integration", () => {
     const agent = mockState.agentInstances[0] as FakeAgent | undefined;
     const session = agent?.sessions[0];
     expect(session?.prompts).toHaveLength(1);
-    expect(session?.prompts[0]).toContain("d-connect 支持通过命令行添加 loop 任务。");
+    expect(session?.prompts[0]).toContain("d-connect 支持通过命令行管理 loop 任务。");
     expect(session?.prompts[0]).toContain('d-connect loop add -p "demo" -s "local:alice" -e "<scheduleExpr>" "<prompt>"');
+    expect(session?.prompts[0]).toContain('d-connect loop list -p "demo"');
+    expect(session?.prompts[0]).toContain('d-connect loop del -i "<jobId>" -c <configPath>');
+    expect(session?.prompts[0]).toContain("`<prompt>` 只能写任务动作本身");
     expect(session?.prompts[0]).not.toContain("pnpm run dev");
     expect(session?.prompts[0]).toContain("用户请求：每天早上 9 点提醒我检查构建状态，规则用 0 0 9 * * *");
     expect(result.response).not.toContain("unknown /loop command");
