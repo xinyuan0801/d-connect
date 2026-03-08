@@ -1,6 +1,6 @@
 {
   "name": "@xinyuan0801/d-connect",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Bridge local coding agents to DingTalk and Feishu",
   "license": "MIT",
@@ -34,6 +34,7 @@
   "scripts": {
     "build": "rm -rf dist && vite build && chmod +x dist/index.js",
     "dev": "tsx src/index.ts",
+    "publish": "pnpm run prepublishOnly && sh -c 'if [ \"${1-}\" = \"--\" ]; then shift; fi; pnpm publish --ignore-scripts \"$@\"' --",
     "prepublishOnly": "pnpm test && pnpm run build",
     "test": "vitest run",
     "test:watch": "vitest",
