@@ -1,7 +1,11 @@
+import { mkdtemp, mkdir, utimes, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, test, vi } from "vitest";
 import {
   IFlowAdapter,
   createIFlowAdapter,
+  findLatestTranscript,
   recordAssistantTools,
   recordToolResults,
   readTranscriptDelta,
@@ -22,6 +26,23 @@ function createState(): IFlowPendingToolState {
 }
 
 describe("iflow pending tool tracking", () => {
+  test("new session only attaches transcripts created after the turn starts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "d-connect-iflow-"));
+    const sessionDir = join(root, "sessions");
+    await mkdir(sessionDir, { recursive: true });
+
+    const oldTranscript = join(sessionDir, "session-old.jsonl");
+    const newTranscript = join(sessionDir, "session-new.jsonl");
+    await writeFile(oldTranscript, "", "utf8");
+    await writeFile(newTranscript, "", "utf8");
+
+    const startedAtMs = Date.now();
+    await utimes(oldTranscript, startedAtMs / 1000 - 5, startedAtMs / 1000 - 5);
+    await utimes(newTranscript, startedAtMs / 1000 + 1, startedAtMs / 1000 + 1);
+
+    expect(await findLatestTranscript(sessionDir, startedAtMs)).toBe(newTranscript);
+  });
+
   test("does not re-queue a completed tool when assistant repeats the same tool_use", () => {
     const state = createState();
 

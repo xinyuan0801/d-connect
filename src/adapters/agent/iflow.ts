@@ -261,7 +261,7 @@ async function fileSize(path: string): Promise<number> {
   }
 }
 
-async function findLatestTranscript(sessionDir: string, startedAtMs: number): Promise<string | undefined> {
+export async function findLatestTranscript(sessionDir: string, startedAtMs: number): Promise<string | undefined> {
   let entries;
   try {
     entries = await readdir(sessionDir, { withFileTypes: true });
@@ -269,7 +269,6 @@ async function findLatestTranscript(sessionDir: string, startedAtMs: number): Pr
     return undefined;
   }
 
-  const cutoffMs = startedAtMs - 2000;
   const candidates: Array<{ path: string; mtimeMs: number }> = [];
 
   for (const entry of entries) {
@@ -283,7 +282,9 @@ async function findLatestTranscript(sessionDir: string, startedAtMs: number): Pr
     const path = join(sessionDir, entry.name);
     try {
       const info = await stat(path);
-      if (info.mtimeMs >= cutoffMs) {
+      // For brand new sessions, only bind to transcripts created by this turn.
+      // Otherwise a just-finished guard turn can be mistaken for the real chat turn.
+      if (info.mtimeMs >= startedAtMs) {
         candidates.push({ path, mtimeMs: info.mtimeMs });
       }
     } catch {
