@@ -41,6 +41,15 @@ pnpm run dev loop add -p <project> -s local:debug -e "*/30 * * * * *" "status"
 pnpm run dev loop list -p <project>
 ```
 
+## 发布流程
+
+- npm 正式发布使用 `pnpm run publish`；该脚本会先执行 `pnpm test` 和 `pnpm run build`，再发布到 npm registry。
+- GitHub Release 与 GitHub Packages 通过推送 `v*` 标签自动触发；对应 workflow 位于 `.github/workflows/release.yml`。
+- 发布新版本时，顺序应为：先更新 `package.json` 版本并推送 `main`，再创建并推送同版本标签，例如 `git tag v0.1.2 && git push origin v0.1.2`。
+- 标签版本必须与 `package.json` 中的 `version` 完全一致，否则 release workflow 会失败。
+- GitHub Actions 的 release workflow 会自动执行测试、构建、创建 GitHub Release，并将同版本包发布到 GitHub Packages。
+- 若只是调整发布流程或仓库运维逻辑，优先更新 `AGENTS.md`；只有用户实际使用方式发生变化时才同步更新 `README.md`。
+
 ## 目录结构
 
 - `src/bootstrap/**`：CLI 入口装配、daemon 启动编排、信号处理。

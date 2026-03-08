@@ -10,7 +10,7 @@
 
 ### Changed
 
-- README 补充 GitHub Releases 与 GitHub Packages 的触发方式说明。
+- 将发布自动化和仓库运维说明沉淀到 `AGENTS.md`，不再放在 `README.md`。
 
 ## [0.1.1] - 2026-03-08
 
