@@ -240,7 +240,6 @@ function draftToAnswers(draft: WizardDraft, options: RunConfigWizardOptions): In
     agentType,
     agentCmd: (draft.agentCmd ?? defaultAgentCommand(agentType)).trim(),
     agentWorkDir,
-    agentMode: (draft.agentMode ?? options.defaults.agentMode).trim(),
     agentModel: draft.agentModel ?? defaultAgentModel(agentType),
     platformType: "dingtalk",
     allowFrom: (draft.allowFrom ?? options.defaults.allowFrom).trim(),

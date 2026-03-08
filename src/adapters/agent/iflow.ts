@@ -11,7 +11,6 @@ import type {
   AgentEvent,
   AgentSession,
   ModelSwitchable,
-  ModeSwitchable,
   PermissionResult,
 } from "../../runtime/types.js";
 import type { BaseAgentOptions } from "./options.js";
@@ -21,7 +20,6 @@ import {
   type IFlowToolResult,
   type IFlowToolUse,
   iflowProjectKey,
-  normalizeIFlowMode,
   summarizeToolInput,
 } from "./iflow-transcript.js";
 
@@ -30,7 +28,6 @@ const TURN_IDLE_MS = 900;
 const TURN_IDLE_AFTER_TOOL_MS = 5000;
 const TURN_POST_TOOL_RESPONSE_TIMEOUT_MS = 30000;
 const PENDING_TOOL_TIMEOUT_MS = 45000;
-const PENDING_TOOL_TIMEOUT_DEFAULT_MODE_MS = 6000;
 const TURN_HARD_TIMEOUT_MS = 120000;
 const TURN_NO_RESULT_TIMEOUT_MS = 30000;
 
@@ -188,20 +185,6 @@ function safeJsonParse<T>(line: string): T | null {
     return JSON.parse(line) as T;
   } catch {
     return null;
-  }
-}
-
-function toModeArgs(mode: "default" | "auto-edit" | "plan" | "yolo"): string[] {
-  switch (mode) {
-    case "auto-edit":
-      return ["--autoEdit"];
-    case "plan":
-      return ["--plan"];
-    case "yolo":
-      return ["--yolo"];
-    case "default":
-    default:
-      return ["--default"];
   }
 }
 
@@ -660,13 +643,13 @@ class IFlowSession extends EventEmitter implements AgentSession {
   }
 }
 
-export class IFlowAdapter implements AgentAdapter, ModeSwitchable, ModelSwitchable {
+export class IFlowAdapter implements AgentAdapter, ModelSwitchable {
   readonly name = "iflow";
 
   readonly command: string;
   readonly workDir: string;
 
-  private modeValue: "default" | "auto-edit" | "plan" | "yolo";
+  private readonly modeValue = "yolo";
   private modelValue: string;
   private readonly extraArgs: string[];
   private readonly extraEnv: Record<string, string>;
@@ -676,7 +659,6 @@ export class IFlowAdapter implements AgentAdapter, ModeSwitchable, ModelSwitchab
   constructor(options: BaseAgentOptions, readonly logger: Logger) {
     this.command = options.cmd && options.cmd.length > 0 ? options.cmd : "iflow";
     this.workDir = normalizePath(options.workDir ?? process.cwd());
-    this.modeValue = normalizeIFlowMode(options.mode);
     this.modelValue = options.model ?? "";
     this.extraArgs = Array.isArray(options.args) ? [...options.args] : [];
     this.extraEnv = options.env ? { ...options.env } : {};
@@ -684,14 +666,6 @@ export class IFlowAdapter implements AgentAdapter, ModeSwitchable, ModelSwitchab
 
   get sessionDir(): string {
     return join(homedir(), ".iflow", "projects", iflowProjectKey(normalizePath(this.workDir)));
-  }
-
-  supportedModes(): string[] {
-    return ["default", "auto-edit", "plan", "yolo"];
-  }
-
-  setMode(mode: string): void {
-    this.modeValue = normalizeIFlowMode(mode);
   }
 
   getMode(): string {
@@ -713,7 +687,7 @@ export class IFlowAdapter implements AgentAdapter, ModeSwitchable, ModelSwitchab
       args.push("-m", this.modelValue);
     }
 
-    args.push(...toModeArgs(this.modeValue));
+    args.push("--yolo");
 
     if (sessionId) {
       args.push("-r", sessionId);
@@ -726,9 +700,6 @@ export class IFlowAdapter implements AgentAdapter, ModeSwitchable, ModelSwitchab
   }
 
   pendingToolTimeoutMs(): number {
-    if (this.modeValue === "default") {
-      return PENDING_TOOL_TIMEOUT_DEFAULT_MODE_MS;
-    }
     return PENDING_TOOL_TIMEOUT_MS;
   }
 

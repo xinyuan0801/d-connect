@@ -27,7 +27,6 @@ export const baseAgentOptionsSchema = z
     cmd: z.string().min(1).optional(),
     args: z.array(z.string()).optional(),
     workDir: z.string().min(1).optional(),
-    mode: z.string().min(1).optional(),
     model: z.string().optional(),
     env: z.record(z.string(), z.string()).optional(),
     promptArg: z.string().min(1).optional(),

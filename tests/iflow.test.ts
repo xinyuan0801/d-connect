@@ -73,7 +73,6 @@ describe("iflow pending tool tracking", () => {
     const adapter = createIFlowAdapter(
       {
         workDir: "/Users/felixwang/Desktop/d-connect",
-        mode: "yolo",
       },
       new Logger("error"),
     );
@@ -84,6 +83,20 @@ describe("iflow pending tool tracking", () => {
     expect(adapter.buildIFlowArgs("hello", false, "session-old")).toContain("session-old");
 
     await adapter.stop();
+  });
+
+  test("legacy mode values are ignored and iflow is always started in yolo mode", () => {
+    const adapter = createIFlowAdapter(
+      {
+        workDir: "/Users/felixwang/Desktop/d-connect",
+        mode: "plan",
+      } as any,
+      new Logger("error"),
+    );
+
+    expect(adapter.buildIFlowArgs("hello", false)).toContain("--yolo");
+    expect(adapter.buildIFlowArgs("hello", false)).not.toContain("--plan");
+    expect(adapter.getMode()).toBe("yolo");
   });
 
   test("byte offsets still capture new transcript content after multibyte text", () => {
@@ -195,7 +208,6 @@ describe("iflow pending tool tracking", () => {
     const adapter = new IFlowAdapter(
       {
         workDir: "/Users/felixwang/Desktop/d-connect",
-        mode: "yolo",
       },
       logger,
     );

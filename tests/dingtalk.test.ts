@@ -990,6 +990,37 @@ describe("dingtalk adapter", () => {
     });
   });
 
+  test("send renders tool status messages as fenced code markdown", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      text: async () => "ok",
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = createAdapter();
+
+    await adapter.send(
+      {
+        platform: "dingtalk",
+        payload: {
+          sessionWebhook: "https://example.com/webhook",
+          sessionWebhookExpiredTime: Date.now() + 60_000,
+          conversationId: "cid",
+          senderId: "uid",
+        },
+      },
+      "🛠️ Agent\n`Explore | Explore codebase structure`",
+    );
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      msgtype: "markdown",
+      markdown: {
+        title: "🛠️ Agent",
+        text: "🛠️ Agent\n```json\nExplore | Explore codebase structure\n```",
+      },
+    });
+  });
+
   test("onDownstream sends a delayed processing notice for slow turns", async () => {
     vi.useFakeTimers();
 

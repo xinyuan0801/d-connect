@@ -5,7 +5,6 @@ import type {
   AgentEvent,
   AgentSession,
   ModelSwitchable,
-  ModeSwitchable,
 } from "../../runtime/types.js";
 import type { BaseAgentOptions } from "./options.js";
 import { BaseCliSession, type Invocation } from "./shared/base-cli-session.js";
@@ -466,32 +465,18 @@ class QoderSession extends BaseCliSession implements AgentSession {
   }
 }
 
-export class QoderAdapter implements AgentAdapter, ModeSwitchable, ModelSwitchable {
+export class QoderAdapter implements AgentAdapter, ModelSwitchable {
   readonly name = "qoder";
 
   private readonly logger: Logger;
   private readonly options: BaseAgentOptions;
   private readonly sessions = new Set<QoderSession>();
-  private modeValue: string;
   private modelValue: string;
 
   constructor(options: BaseAgentOptions, logger: Logger) {
     this.logger = logger.child("qoder");
     this.options = options;
-    this.modeValue = options.mode ?? "default";
     this.modelValue = options.model ?? "";
-  }
-
-  supportedModes(): string[] {
-    return ["default", "plan", this.modeValue].filter((value, index, all) => all.indexOf(value) === index);
-  }
-
-  setMode(mode: string): void {
-    this.modeValue = mode;
-  }
-
-  getMode(): string {
-    return this.modeValue;
   }
 
   setModel(model: string): void {

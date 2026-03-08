@@ -1,6 +1,6 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, expect, test } from "vitest";
 import { Logger } from "../src/logging.js";
 import { createSessionStore } from "../src/runtime/session-store.js";
@@ -22,13 +22,13 @@ class FakeAgent implements AgentAdapter {
   }
 }
 
-async function createHarness() {
+async function createHarness(configPath?: string) {
   const dataDir = await mkdtemp(join(tmpdir(), "d-connect-command-"));
   const sessions = await createSessionStore(dataDir);
   const conversation = new ConversationService(sessions, new Logger("error"));
   const loopStore = await createLoopStore(dataDir);
   const loop = new LoopScheduler(loopStore, new Logger("error"));
-  const service = new CommandService(conversation, loop);
+  const service = new CommandService(conversation, loop, configPath);
   const runtime: ProjectRuntime = {
     config: {
       name: "demo",
@@ -181,6 +181,52 @@ describe("command service", () => {
       expect(result.prompt).toContain('示例：用户请求“每天晚上8点22介绍一下自己” -> d-connect loop add -p "demo" -s "local:alice" -e "22 20 * * *" "介绍一下自己"');
       expect(result.prompt).not.toContain("pnpm run dev");
       expect(result.prompt).toContain("用户请求：每天早上 9 点提醒我检查构建状态，规则用 0 0 9 * * *");
+    }
+  });
+
+  test("injects explicit config path into natural language loop instructions", async () => {
+    const configPath = "/tmp/d-connect/config.qoder.json";
+    const { service, conversation, runtime } = await createHarness(configPath);
+    const session = conversation.getOrCreateActiveSession("demo", "local:alice");
+
+    const result = await service.handle({
+      runtime,
+      project: "demo",
+      sessionKey: "local:alice",
+      session,
+      raw: "/loop 每天晚上8点29介绍一下自己",
+    });
+
+    expect(result.kind).toBe("forward_to_agent");
+    if (result.kind === "forward_to_agent") {
+      expect(result.prompt).toContain(`当前 configPath: ${configPath}`);
+      expect(result.prompt).toContain(`d-connect loop add -p "demo" -s "local:alice" -e "<scheduleExpr>" -c "${configPath}" "<prompt>"`);
+      expect(result.prompt).toContain(`d-connect loop list -p "demo" -c "${configPath}"`);
+      expect(result.prompt).toContain(`d-connect loop del -i "<jobId>" -c "${configPath}"`);
+      expect(result.prompt).toContain(`固定为 "${configPath}"`);
+    }
+  });
+
+  test("normalizes relative config path into absolute path in loop instructions", async () => {
+    const relativePath = "./config.qodercli-dingtalk.local.json";
+    const absolutePath = resolve(relativePath);
+    const { service, conversation, runtime } = await createHarness(relativePath);
+    const session = conversation.getOrCreateActiveSession("demo", "local:alice");
+
+    const result = await service.handle({
+      runtime,
+      project: "demo",
+      sessionKey: "local:alice",
+      session,
+      raw: "/loop 每天晚上8点29介绍一下自己",
+    });
+
+    expect(result.kind).toBe("forward_to_agent");
+    if (result.kind === "forward_to_agent") {
+      expect(result.prompt).toContain(`当前 configPath: ${absolutePath}`);
+      expect(result.prompt).toContain(`d-connect loop add -p "demo" -s "local:alice" -e "<scheduleExpr>" -c "${absolutePath}" "<prompt>"`);
+      expect(result.prompt).toContain(`d-connect loop list -p "demo" -c "${absolutePath}"`);
+      expect(result.prompt).toContain(`d-connect loop del -i "<jobId>" -c "${absolutePath}"`);
     }
   });
 });

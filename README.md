@@ -77,7 +77,6 @@ d-connect start
         "options": {
           "workDir": "/path/to/repo",
           "cmd": "claude",
-          "mode": "default",
           "model": "claude-sonnet-4-20250514"
         }
       },
@@ -111,6 +110,7 @@ d-connect start
 
 - `allowFrom: "*"` 表示允许全部用户，也可以改成逗号分隔的用户 ID
 - `processingNotice: "none"` 可以关闭“处理中...”提示
+- 所有 Agent 默认以 `yolo` 方式运行，不再提供单独的 `agent.options.mode` 配置
 - 如果你想接 `Feishu`，把 `platforms` 里的平台类型和凭证改成飞书配置即可
 
 ## 常用命令
@@ -142,7 +142,6 @@ d-connect loop del -i <job-id>
 /new [name]
 /list
 /switch <id|name>
-/mode [name]
 /loop <request>
 /loop list
 /loop add <expr> <prompt>
@@ -154,7 +153,6 @@ d-connect loop del -i <job-id>
 - `/new`：新开一个逻辑 session
 - `/list`：查看当前聊天对象下已有的 session
 - `/switch`：切换到别的 session
-- `/mode`：查看或切换 agent mode
 - `/loop <request>`：用自然语言描述一个定时任务，让 Agent 帮你整理成可执行命令
 - `/loop ...`：直接在聊天里管理定时任务
 

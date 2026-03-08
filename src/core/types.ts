@@ -74,12 +74,6 @@ export interface AgentAdapter {
   stop(): Promise<void>;
 }
 
-export interface ModeSwitchable {
-  setMode(mode: string): void;
-  getMode(): string;
-  supportedModes(): string[];
-}
-
 export interface ModelSwitchable {
   setModel(model: string): void;
   getModel(): string;

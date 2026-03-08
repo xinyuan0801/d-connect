@@ -11,21 +11,33 @@ function isResolvedConfig(config: AppConfig | ResolvedAppConfig): config is Reso
   return typeof (config as Partial<ResolvedAppConfig>).dataDir === "string";
 }
 
+export interface RuntimeEngineOptions {
+  configPath?: string;
+}
+
 export class RuntimeEngine {
   private runtime?: DaemonRuntime;
   private readonly resolvedConfig: ResolvedAppConfig;
+  private readonly options: RuntimeEngineOptions;
 
   constructor(
     config: AppConfig | ResolvedAppConfig,
     private readonly logger: Logger,
     private readonly loopScheduler?: LoopScheduler,
+    options: RuntimeEngineOptions = {},
   ) {
     this.resolvedConfig = isResolvedConfig(config) ? config : normalizeConfig(config);
+    this.options = options;
   }
 
   private async ensureRuntime(): Promise<DaemonRuntime> {
     if (!this.runtime) {
-      this.runtime = await DaemonRuntime.create(this.resolvedConfig, this.logger, this.loopScheduler);
+      this.runtime = await DaemonRuntime.create(
+        this.resolvedConfig,
+        this.logger,
+        this.loopScheduler,
+        this.options.configPath,
+      );
     }
     return this.runtime;
   }

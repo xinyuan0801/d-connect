@@ -47,8 +47,8 @@ describe("runtime response formatting", () => {
     ];
 
     expect(summarizeToolMessages(events)).toEqual([
-      "🛠️ 调用工具 `web_search` (id: web_search:0)，输入: 2026年3月7日 新闻",
-      "🛠️ 调用工具 `web_search` (id: web_search:1)，输入: 2026年3月7日 国际新闻 热点",
+      "🛠️ web_search\n`2026年3月7日 新闻`",
+      "🛠️ web_search\n`2026年3月7日 国际新闻 热点`",
     ]);
 
     expect(
@@ -59,9 +59,9 @@ describe("runtime response formatting", () => {
     ).toBe(
       [
         "我来帮你搜索今天（2026年3月7日）的新闻。",
-        "🛠️ 调用工具 `web_search` (id: web_search:0)，输入: 2026年3月7日 新闻",
+        "🛠️ web_search\n`2026年3月7日 新闻`",
         "让我再搜索一些更多信息：",
-        "🛠️ 调用工具 `web_search` (id: web_search:1)，输入: 2026年3月7日 国际新闻 热点",
+        "🛠️ web_search\n`2026年3月7日 国际新闻 热点`",
         "以下是今天（2026年3月7日）的主要新闻总结：",
       ].join("\n\n"),
     );
@@ -73,9 +73,9 @@ describe("runtime response formatting", () => {
       ),
     ).toEqual([
       "我来帮你搜索今天（2026年3月7日）的新闻。",
-      "🛠️ 调用工具 `web_search` (id: web_search:0)，输入: 2026年3月7日 新闻",
+      "🛠️ web_search\n`2026年3月7日 新闻`",
       "让我再搜索一些更多信息：",
-      "🛠️ 调用工具 `web_search` (id: web_search:1)，输入: 2026年3月7日 国际新闻 热点",
+      "🛠️ web_search\n`2026年3月7日 国际新闻 热点`",
       "以下是今天（2026年3月7日）的主要新闻总结：",
     ]);
   });
@@ -107,7 +107,7 @@ describe("runtime response formatting", () => {
     ).toBe(
       [
         "我来帮你搜索今天的新闻。",
-        "🛠️ 调用工具 `web_search` (id: web_search:0)，输入: 2026年3月7日 新闻",
+        "🛠️ web_search\n`2026年3月7日 新闻`",
         "iflow 在工具执行后结束了当前轮次，但没有产出最终回复；已保留底层续聊状态。",
       ].join("\n\n"),
     );
@@ -119,7 +119,7 @@ describe("runtime response formatting", () => {
       ),
     ).toEqual([
       "我来帮你搜索今天的新闻。",
-      "🛠️ 调用工具 `web_search` (id: web_search:0)，输入: 2026年3月7日 新闻",
+      "🛠️ web_search\n`2026年3月7日 新闻`",
       "iflow 在工具执行后结束了当前轮次，但没有产出最终回复；已保留底层续聊状态。",
     ]);
   });
@@ -144,7 +144,7 @@ describe("runtime response formatting", () => {
     ];
 
     expect(splitResponseMessages("正在处理命令执行结果。", events)).toEqual([
-      "🛠️ 调用工具 `run_shell_command` (id: shell:0)，输入: echo hello",
+      "🛠️ run_shell_command\n`echo hello`",
       "正在处理命令执行结果。",
     ]);
   });
@@ -164,7 +164,21 @@ describe("runtime response formatting", () => {
     ];
 
     expect(splitResponseMessages("done", events)).toEqual([
-      "🛠️ 调用工具 `Agent`，输入: Explore | Explore codebase structure",
+      "🛠️ Agent\n`Explore | Explore codebase structure`",
+    ]);
+  });
+
+  test("wraps tool input safely when the argument contains backticks", () => {
+    const events: AgentEvent[] = [
+      {
+        type: "tool_use",
+        toolName: "run_shell_command",
+        toolInput: "printf '`hello`'",
+      },
+    ];
+
+    expect(splitResponseMessages("done", events)).toEqual([
+      "🛠️ run_shell_command\n``printf '`hello`'``",
     ]);
   });
 });

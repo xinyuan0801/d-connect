@@ -64,7 +64,6 @@ describe("add config", () => {
         options: {
           workDir: "/srv/repo",
           cmd: "claude",
-          mode: "default",
           model: "claude-sonnet-4-20250514",
         },
       },

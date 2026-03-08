@@ -2,13 +2,13 @@ import { Logger } from "../../logging.js";
 import {
   parseAgentLine,
 } from "./parsers.js";
-import type { AgentAdapter, AgentEvent, AgentSession, ModelSwitchable, ModeSwitchable } from "../../runtime/types.js";
+import type { AgentAdapter, AgentEvent, AgentSession, ModelSwitchable } from "../../runtime/types.js";
 import type { BaseAgentOptions } from "./options.js";
 import { BaseCliSession, type Invocation } from "./shared/base-cli-session.js";
 
 type RawRecord = Record<string, unknown>;
 
-type ClaudePermissionMode = "default" | "acceptEdits" | "plan" | "bypassPermissions";
+type ClaudePermissionMode = "bypassPermissions";
 
 const NO_CONVERSATION_ERROR_PATTERN = /no conversation found with session id/i;
 
@@ -27,20 +27,6 @@ function pickString(payload: RawRecord, keys: readonly string[]): string | undef
     }
   }
   return undefined;
-}
-
-function normalizePermissionMode(raw: string): ClaudePermissionMode {
-  const value = raw.toLowerCase().trim().replace(/[_\-\s]/g, "");
-  if (value === "acceptedits") {
-    return "acceptEdits";
-  }
-  if (value === "plan") {
-    return "plan";
-  }
-  if (value === "bypasspermissions" || value === "yolo" || value === "auto") {
-    return "bypassPermissions";
-  }
-  return "default";
 }
 
 function normalizeToolList(value: unknown): string[] {
@@ -307,12 +293,12 @@ class ClaudeCodeSession extends BaseCliSession implements AgentSession {
   }
 }
 
-export class ClaudeCodeAdapter implements AgentAdapter, ModeSwitchable, ModelSwitchable {
+export class ClaudeCodeAdapter implements AgentAdapter, ModelSwitchable {
   readonly name = "claudecode";
   private readonly logger: Logger;
   private readonly options: BaseAgentOptions;
   private readonly sessions = new Set<ClaudeCodeSession>();
-  private modeValue: ClaudePermissionMode;
+  private readonly modeValue: ClaudePermissionMode = "bypassPermissions";
   private modelValue: string;
   private allowedTools: string[] = [];
   private unknownOptions: Record<string, unknown>;
@@ -320,7 +306,6 @@ export class ClaudeCodeAdapter implements AgentAdapter, ModeSwitchable, ModelSwi
   constructor(options: BaseAgentOptions, logger: Logger) {
     this.logger = logger.child("claudecode");
     this.options = options;
-    this.modeValue = normalizePermissionMode(options.mode ?? "default");
     this.modelValue = options.model ?? "";
     this.unknownOptions = options as unknown as Record<string, unknown>;
     this.allowedTools = normalizeToolList(
@@ -330,22 +315,6 @@ export class ClaudeCodeAdapter implements AgentAdapter, ModeSwitchable, ModelSwi
         this.unknownOptions.routerAllowedTools ??
         [],
     );
-  }
-
-  supportedModes(): string[] {
-    const modes: ClaudePermissionMode[] = ["default", "acceptEdits", "plan", "bypassPermissions"];
-    if (!modes.includes(this.modeValue)) {
-      modes.push(this.modeValue);
-    }
-    return modes;
-  }
-
-  setMode(mode: string): void {
-    this.modeValue = normalizePermissionMode(mode);
-  }
-
-  getMode(): string {
-    return this.modeValue;
   }
 
   setModel(model: string): void {
@@ -374,9 +343,7 @@ export class ClaudeCodeAdapter implements AgentAdapter, ModeSwitchable, ModelSwi
       "stdio",
     ];
 
-    if (this.modeValue !== "default") {
-      args.push("--permission-mode", this.modeValue);
-    }
+    args.push("--permission-mode", this.modeValue);
     if (sessionId.length > 0) {
       args.push("--resume", sessionId);
     }

@@ -13,7 +13,6 @@ function toBaseOptions(value: Record<string, unknown>): BaseAgentOptions {
     options.args = value.args as string[];
   }
   if (typeof value.workDir === "string") options.workDir = value.workDir;
-  if (typeof value.mode === "string") options.mode = value.mode;
   if (typeof value.model === "string") options.model = value.model;
   if (typeof value.promptArg === "string") options.promptArg = value.promptArg;
   if (typeof value.stdinPrompt === "boolean") options.stdinPrompt = value.stdinPrompt;

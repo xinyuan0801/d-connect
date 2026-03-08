@@ -13,7 +13,6 @@ describe("init config", () => {
       agentType: "claudecode" as const,
       agentCmd: "claude",
       agentWorkDir: "/tmp/repo",
-      agentMode: "default",
       agentModel: "claude-sonnet-4-20250514",
       platformType: "dingtalk" as const,
       dingtalkClientId: "ding123",
@@ -28,7 +27,6 @@ describe("init config", () => {
     expect(config.projects[0]?.agent.options).toMatchObject({
       workDir: "/tmp/repo",
       cmd: "claude",
-      mode: "default",
       model: "claude-sonnet-4-20250514",
     });
     expect(config.projects[0]?.platforms[0]).toEqual({
@@ -52,7 +50,6 @@ describe("init config", () => {
       agentType: "qoder" as const,
       agentCmd: "qodercli",
       agentWorkDir: "/tmp/repo2",
-      agentMode: "default",
       agentModel: "",
       platformType: "feishu" as const,
       feishuAppId: "cli_123",
@@ -68,7 +65,6 @@ describe("init config", () => {
     expect(config.projects[0]?.agent.options).toEqual({
       workDir: "/tmp/repo2",
       cmd: "qodercli",
-      mode: "default",
     });
     expect(config.projects[0]?.platforms[0]).toEqual({
       type: "feishu",
@@ -109,6 +105,7 @@ describe("init config", () => {
 
     const rawFile = await readFile(configPath, "utf8");
     expect(rawFile).not.toContain("\"dataDir\"");
+    expect(rawFile).not.toContain("\"mode\"");
     expect(rawFile).toContain("\"loop\":");
 
     const parsed = await loadConfig(configPath);

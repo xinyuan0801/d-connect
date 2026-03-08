@@ -43,7 +43,9 @@ export async function startDaemon(options: StartAppOptions = {}): Promise<void> 
 
   const loopStore = await createLoopStore(config.dataDir);
   const loopScheduler = new LoopScheduler(loopStore, logger.child("loop"), config.loop.silent);
-  const runtime = new RuntimeEngine(config, logger.child("runtime"), loopScheduler);
+  const runtime = new RuntimeEngine(config, logger.child("runtime"), loopScheduler, {
+    configPath,
+  });
   const ipcServer = new IpcServer({
     socketPath: join(config.dataDir, "ipc.sock"),
     runtime,

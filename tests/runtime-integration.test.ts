@@ -251,6 +251,7 @@ describe("runtime integration", () => {
 
   test("routes natural language /loop requests into agent prompts", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "d-connect-runtime-"));
+    const configPath = "/tmp/d-connect/runtime-config.json";
     const config = {
       configVersion: 1,
       dataDir,
@@ -283,7 +284,7 @@ describe("runtime integration", () => {
 
     const loopStore = await createLoopStore(dataDir);
     const loopScheduler = new LoopScheduler(loopStore, new Logger("error"));
-    const runtime = new RuntimeEngine(config, new Logger("error"), loopScheduler);
+    const runtime = new RuntimeEngine(config, new Logger("error"), loopScheduler, { configPath });
     await runtime.start();
 
     const result = await runtime.send({
@@ -296,9 +297,10 @@ describe("runtime integration", () => {
     const session = agent?.sessions[0];
     expect(session?.prompts).toHaveLength(1);
     expect(session?.prompts[0]).toContain("d-connect 支持通过命令行管理 loop 任务。");
-    expect(session?.prompts[0]).toContain('d-connect loop add -p "demo" -s "local:alice" -e "<scheduleExpr>" "<prompt>"');
-    expect(session?.prompts[0]).toContain('d-connect loop list -p "demo"');
-    expect(session?.prompts[0]).toContain('d-connect loop del -i "<jobId>" -c <configPath>');
+    expect(session?.prompts[0]).toContain(`当前 configPath: ${configPath}`);
+    expect(session?.prompts[0]).toContain(`d-connect loop add -p "demo" -s "local:alice" -e "<scheduleExpr>" -c "${configPath}" "<prompt>"`);
+    expect(session?.prompts[0]).toContain(`d-connect loop list -p "demo" -c "${configPath}"`);
+    expect(session?.prompts[0]).toContain(`d-connect loop del -i "<jobId>" -c "${configPath}"`);
     expect(session?.prompts[0]).toContain("`<prompt>` 只能写任务动作本身");
     expect(session?.prompts[0]).not.toContain("pnpm run dev");
     expect(session?.prompts[0]).toContain("用户请求：每天早上 9 点提醒我检查构建状态，规则用 0 0 9 * * *");

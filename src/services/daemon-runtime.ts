@@ -55,17 +55,23 @@ export class DaemonRuntime implements JobExecutor {
     private readonly logger: Logger,
     sessions: SessionRepository,
     private readonly loopScheduler?: LoopScheduler,
+    private readonly configPath?: string,
   ) {
     this.sessions = sessions;
     this.registry = new ProjectRegistry(config, logger.child("runtime"));
     this.conversations = new ConversationService(sessions, logger.child("conversation"));
-    this.commandService = new CommandService(this.conversations, loopScheduler);
+    this.commandService = new CommandService(this.conversations, loopScheduler, configPath);
     this.guardService = new GuardService(logger.child("guard"));
   }
 
-  static async create(config: ResolvedAppConfig, logger: Logger, loopScheduler?: LoopScheduler): Promise<DaemonRuntime> {
+  static async create(
+    config: ResolvedAppConfig,
+    logger: Logger,
+    loopScheduler?: LoopScheduler,
+    configPath?: string,
+  ): Promise<DaemonRuntime> {
     const sessions = await createSessionStore(config.dataDir);
-    return new DaemonRuntime(config, logger, sessions, loopScheduler);
+    return new DaemonRuntime(config, logger, sessions, loopScheduler, configPath);
   }
 
   async start(): Promise<void> {

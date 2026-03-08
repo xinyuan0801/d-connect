@@ -17,7 +17,6 @@ export interface InitAnswers {
   agentType: AgentType;
   agentCmd: string;
   agentWorkDir: string;
-  agentMode: string;
   agentModel: string;
   platformType: PlatformType;
   allowFrom: string;
@@ -79,7 +78,6 @@ export function defaultInitAnswers(opts: { cwd?: string } = {}): InitAnswers {
     agentType: "claudecode",
     agentCmd: "claude",
     agentWorkDir: cwd,
-    agentMode: "default",
     agentModel: "claude-sonnet-4-20250514",
     platformType: "dingtalk",
     allowFrom: "*",
@@ -106,7 +104,6 @@ export function buildConfigFromAnswers(answers: InitAnswers): AppConfig {
     feishuAppId: answers.feishuAppId.trim(),
     feishuAppSecret: answers.feishuAppSecret.trim(),
     feishuReactionEmoji: answers.feishuReactionEmoji.trim(),
-    agentMode: answers.agentMode.trim(),
     agentModel: answers.agentModel.trim(),
   };
 
@@ -115,9 +112,6 @@ export function buildConfigFromAnswers(answers: InitAnswers): AppConfig {
     cmd: normalized.agentCmd,
   };
 
-  if (normalized.agentMode.length > 0) {
-    agentOptions.mode = normalized.agentMode;
-  }
   if (normalized.agentModel.length > 0) {
     agentOptions.model = normalized.agentModel;
   }

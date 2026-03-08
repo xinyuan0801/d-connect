@@ -3,6 +3,7 @@ import type { SessionRecord } from "./session-repository.js";
 import { ConversationService } from "./conversation-service.js";
 import { LoopScheduler } from "../scheduler/loop.js";
 import cron from "node-cron";
+import { resolve } from "node:path";
 
 export interface CommandContext {
   runtime: ProjectRuntime;
@@ -49,32 +50,55 @@ function handled(response: string): HandledCommandResult {
   };
 }
 
-function buildLoopCommandPrompt(project: string, sessionKey: string, request: string): string {
+function buildLoopCommandPrompt(project: string, sessionKey: string, request: string, configPath?: string): string {
   const quotedProject = JSON.stringify(project);
   const quotedSessionKey = JSON.stringify(sessionKey);
+  const normalizedConfigPath =
+    typeof configPath === "string" && configPath.trim().length > 0 ? resolve(configPath.trim()) : undefined;
+  const configPathToken = normalizedConfigPath ? JSON.stringify(normalizedConfigPath) : "<configPath>";
+  const addCommand = normalizedConfigPath
+    ? `d-connect loop add -p ${quotedProject} -s ${quotedSessionKey} -e "<scheduleExpr>" -c ${configPathToken} "<prompt>"`
+    : `d-connect loop add -p ${quotedProject} -s ${quotedSessionKey} -e "<scheduleExpr>" "<prompt>"`;
+  const listCommand = normalizedConfigPath
+    ? `d-connect loop list -p ${quotedProject} -c ${configPathToken}`
+    : `d-connect loop list -p ${quotedProject}`;
+  const exampleAddCommand = normalizedConfigPath
+    ? `d-connect loop add -p ${quotedProject} -s ${quotedSessionKey} -e "22 20 * * *" -c ${configPathToken} "介绍一下自己"`
+    : `d-connect loop add -p ${quotedProject} -s ${quotedSessionKey} -e "22 20 * * *" "介绍一下自己"`;
 
-  return [
+  const lines = [
     "用户想通过自然语言管理 d-connect loop 任务（新增/查看/删除）。",
     "d-connect 支持通过命令行管理 loop 任务。",
     `当前 project: ${project}`,
     `当前 sessionKey: ${sessionKey}`,
+  ];
+
+  if (normalizedConfigPath) {
+    lines.push(`当前 configPath: ${normalizedConfigPath}`);
+    lines.push(`重要：执行 d-connect loop 命令时必须带 -c，且固定为 ${configPathToken}。`);
+  }
+
+  lines.push(
     "请根据下面的请求判断应执行 add/list/del 哪个命令，并优先直接执行命令。",
-    `可用命令(add)：d-connect loop add -p ${quotedProject} -s ${quotedSessionKey} -e "<scheduleExpr>" "<prompt>"`,
-    `可用命令(list)：d-connect loop list -p ${quotedProject}`,
-    "可用命令(del)：d-connect loop del -i \"<jobId>\" -c <configPath>",
+    `可用命令(add)：${addCommand}`,
+    `可用命令(list)：${listCommand}`,
+    `可用命令(del)：d-connect loop del -i "<jobId>" -c ${configPathToken}`,
     "当用户要求删除但未提供 jobId 时，先执行 list，再基于用户确认的 jobId 执行 del。",
     "重要：`<prompt>` 只能写任务动作本身，不能包含任何时间/频率/cron 信息（例如“每天、每周、8点22分、22 20 * * *”）。",
     "调度信息只放在 `-e`，`<prompt>` 只保留可执行动作。",
-    `示例：用户请求“每天晚上8点22介绍一下自己” -> d-connect loop add -p ${quotedProject} -s ${quotedSessionKey} -e "22 20 * * *" "介绍一下自己"`,
+    `示例：用户请求“每天晚上8点22介绍一下自己” -> ${exampleAddCommand}`,
     "如果无法准确区分调度和任务动作，再向用户确认。",
     `用户请求：${request}`,
-  ].join("\n");
+  );
+
+  return lines.join("\n");
 }
 
 export class CommandService {
   constructor(
     private readonly conversations: ConversationService,
     private readonly loopScheduler?: LoopScheduler,
+    private readonly configPath?: string,
   ) {}
 
   async handle(context: CommandContext): Promise<CommandResult> {
@@ -181,7 +205,7 @@ export class CommandService {
 
         return {
           kind: "forward_to_agent",
-          prompt: buildLoopCommandPrompt(project, sessionKey, raw.trim().slice("/loop".length).trim()),
+          prompt: buildLoopCommandPrompt(project, sessionKey, raw.trim().slice("/loop".length).trim(), this.configPath),
         };
       }
 

@@ -72,14 +72,20 @@ export abstract class BaseCliSession extends EventEmitter implements AgentSessio
 
   protected async runOnce(prompt: string, sessionId: string): Promise<void> {
     const invocation = this.buildInvocation(prompt, sessionId);
+    const childCwd = invocation.cwd ?? process.cwd();
+    const childEnv = {
+      ...process.env,
+      ...(invocation.env ?? {}),
+      PWD: childCwd,
+    };
     this.logger.debug(`spawn ${this.providerName()}`, {
       cmd: invocation.cmd,
       args: invocation.args,
     });
 
     const child = spawn(invocation.cmd, invocation.args, {
-      cwd: invocation.cwd ?? process.cwd(),
-      env: invocation.env ? { ...process.env, ...invocation.env } : undefined,
+      cwd: childCwd,
+      env: childEnv,
       stdio: ["pipe", "pipe", "pipe"],
     });
     this.child = child;

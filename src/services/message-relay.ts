@@ -42,6 +42,15 @@ function normalizeInlineText(text: string, maxLength: number): string {
   return `${normalized.slice(0, maxLength)}...`;
 }
 
+function wrapInlineCode(text: string): string {
+  const matches = text.match(/`+/g);
+  const longestFence = matches ? Math.max(...matches.map((match) => match.length)) : 0;
+  const fence = "`".repeat(longestFence + 1);
+  const needsPadding = text.startsWith("`") || text.endsWith("`");
+  const content = needsPadding ? ` ${text} ` : text;
+  return `${fence}${content}${fence}`;
+}
+
 function summarizeAgentToolInput(toolInputRaw?: Record<string, unknown>): string {
   if (!toolInputRaw) {
     return "";
@@ -84,16 +93,12 @@ function createEventRenderState(): EventRenderState {
   };
 }
 
-function toolTag(toolName: string, requestId?: string): string {
-  if (!requestId) {
-    return `\`${toolName}\``;
-  }
-  return `\`${toolName}\` (id: ${requestId})`;
-}
-
 function renderToolRunning(use: PendingToolUse): string {
-  const inputPart = use.toolInput ? `，输入: ${use.toolInput}` : "";
-  return `${TOOL_CALL_EMOJI} 调用工具 ${toolTag(use.toolName, use.requestId)}${inputPart}`;
+  const header = `${TOOL_CALL_EMOJI} ${use.toolName}`;
+  if (!use.toolInput) {
+    return header;
+  }
+  return `${header}\n${wrapInlineCode(use.toolInput)}`;
 }
 
 function flushPendingToolUseMessages(_state: EventRenderState): string[] {

@@ -157,26 +157,6 @@ export function extractToolResults(content: unknown): IFlowToolResult[] {
   return results;
 }
 
-export function normalizeIFlowMode(raw: string | undefined): "default" | "auto-edit" | "plan" | "yolo" {
-  const value = (raw ?? "").trim().toLowerCase();
-  switch (value) {
-    case "auto-edit":
-    case "auto_edit":
-    case "autoedit":
-    case "edit":
-      return "auto-edit";
-    case "plan":
-      return "plan";
-    case "yolo":
-    case "force":
-    case "auto":
-    case "bypasspermissions":
-      return "yolo";
-    default:
-      return "default";
-  }
-}
-
 export function iflowProjectKey(absDir: string): string {
   return absDir.replaceAll("\\", "-").replaceAll("/", "-").replaceAll(":", "-");
 }

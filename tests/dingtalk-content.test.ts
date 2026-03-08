@@ -21,6 +21,16 @@ describe("dingtalk content", () => {
     });
   });
 
+  test("buildDingTalkReplyPayload uses markdown payload for tables", () => {
+    expect(buildDingTalkReplyPayload("| A | B |\n|---|---|")).toEqual({
+      msgtype: "markdown",
+      markdown: {
+        title: "| A | B |",
+        text: "| A | B |\n|---|---|",
+      },
+    });
+  });
+
   test("buildDingTalkReplyPayload falls back to a default title for code fences", () => {
     expect(buildDingTalkReplyPayload("```ts\nconst a = 1;\n```")).toEqual({
       msgtype: "markdown",
@@ -31,11 +41,22 @@ describe("dingtalk content", () => {
     });
   });
 
-  test("buildDingTalkReplyPayload keeps tool status messages as text", () => {
-    expect(buildDingTalkReplyPayload("🛠️ 调用工具 `Agent`，输入: {\"subagent_type\":\"Explore\"}")).toEqual({
-      msgtype: "text",
-      text: {
-        content: "🛠️ 调用工具 `Agent`，输入: {\"subagent_type\":\"Explore\"}",
+  test("buildDingTalkReplyPayload renders tool status messages as fenced code markdown", () => {
+    expect(buildDingTalkReplyPayload("🛠️ Agent\n`Explore | Explore codebase structure`")).toEqual({
+      msgtype: "markdown",
+      markdown: {
+        title: "🛠️ Agent",
+        text: "🛠️ Agent\n```json\nExplore | Explore codebase structure\n```",
+      },
+    });
+  });
+
+  test("buildDingTalkReplyPayload keeps tool status markdown valid when args contain backticks", () => {
+    expect(buildDingTalkReplyPayload("🛠️ run_shell_command\n``printf '`hello`'``")).toEqual({
+      msgtype: "markdown",
+      markdown: {
+        title: "🛠️ run_shell_command",
+        text: "🛠️ run_shell_command\n```json\nprintf '`hello`'\n```",
       },
     });
   });
