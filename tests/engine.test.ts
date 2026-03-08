@@ -148,4 +148,23 @@ describe("runtime response formatting", () => {
       "正在处理命令执行结果。",
     ]);
   });
+
+  test("renders Agent tool calls using structured summary instead of truncated json", () => {
+    const events: AgentEvent[] = [
+      {
+        type: "tool_use",
+        toolName: "Agent",
+        toolInput: "{\"description\":\"Explore codebase structure\",\"prompt\":\"Explore this codebase to understand its architecture and key components\"}",
+        toolInputRaw: {
+          subagent_type: "Explore",
+          description: "Explore codebase structure",
+          prompt: "Explore this codebase to understand its architecture and key components",
+        },
+      },
+    ];
+
+    expect(splitResponseMessages("done", events)).toEqual([
+      "🛠️ 调用工具 `Agent`，输入: Explore | Explore codebase structure",
+    ]);
+  });
 });

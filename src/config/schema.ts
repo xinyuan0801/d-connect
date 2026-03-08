@@ -14,10 +14,41 @@ const cronSchema = z
   .strict()
   .default({ silent: false });
 
-const agentSchema = z.object({
-  type: z.enum(["claudecode", "qoder", "iflow"]),
-  options: z.record(z.string(), z.unknown()).default({}),
-}).strict();
+export const baseAgentOptionsSchema = z
+  .object({
+    cmd: z.string().min(1).optional(),
+    args: z.array(z.string()).optional(),
+    workDir: z.string().min(1).optional(),
+    mode: z.string().min(1).optional(),
+    model: z.string().optional(),
+    env: z.record(z.string(), z.string()).optional(),
+    promptArg: z.string().min(1).optional(),
+    stdinPrompt: z.boolean().optional(),
+  })
+  .catchall(z.unknown());
+
+const claudecodeAgentSchema = z
+  .object({
+    type: z.literal("claudecode"),
+    options: baseAgentOptionsSchema.default({}),
+  })
+  .strict();
+
+const qoderAgentSchema = z
+  .object({
+    type: z.literal("qoder"),
+    options: baseAgentOptionsSchema.default({}),
+  })
+  .strict();
+
+const iflowAgentSchema = z
+  .object({
+    type: z.literal("iflow"),
+    options: baseAgentOptionsSchema.default({}),
+  })
+  .strict();
+
+const agentSchema = z.discriminatedUnion("type", [claudecodeAgentSchema, qoderAgentSchema, iflowAgentSchema]);
 
 const platformSchema = z.object({
   type: z.literal("dingtalk"),
@@ -25,6 +56,7 @@ const platformSchema = z.object({
     clientId: z.string().min(1),
     clientSecret: z.string().min(1),
     allowFrom: z.string().default("*"),
+    processingNotice: z.string().default("处理中..."),
   }).strict(),
 }).strict();
 
@@ -55,3 +87,5 @@ export const configSchema = z.object({
 
 export type AppConfig = z.infer<typeof configSchema>;
 export type ProjectConfig = z.infer<typeof projectSchema>;
+export type AgentConfig = z.infer<typeof agentSchema>;
+export type BaseAgentOptionsConfig = z.infer<typeof baseAgentOptionsSchema>;

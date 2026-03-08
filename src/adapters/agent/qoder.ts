@@ -1,5 +1,3 @@
-import { EventEmitter } from "node:events";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { Logger } from "../../logging.js";
 import { parseAgentLine } from "./parsers.js";
 import type {
@@ -8,19 +6,11 @@ import type {
   AgentSession,
   ModelSwitchable,
   ModeSwitchable,
-  PermissionResult,
 } from "../../runtime/types.js";
 import type { BaseAgentOptions } from "./options.js";
+import { BaseCliSession, type Invocation } from "./shared/base-cli-session.js";
 
 type RawRecord = Record<string, unknown>;
-
-interface Invocation {
-  cmd: string;
-  args: string[];
-  stdinPrompt: boolean;
-  cwd?: string;
-  env?: Record<string, string>;
-}
 
 interface ParsedQoderEvent {
   dedupeKey?: string;
@@ -31,19 +21,6 @@ interface QoderParseOutcome {
   events: ParsedQoderEvent[];
   messageId?: string;
   parsed: boolean;
-}
-
-function extractLines(state: { value: string }, chunk: string): string[] {
-  state.value += chunk;
-  const parts = state.value.split(/\r?\n/);
-  state.value = parts.pop() ?? "";
-  return parts.filter((line) => line.trim().length > 0);
-}
-
-function flushBufferedLine(state: { value: string }): string[] {
-  const line = state.value.trim();
-  state.value = "";
-  return line.length > 0 ? [line] : [];
 }
 
 function asRecord(value: unknown): RawRecord | undefined {
@@ -333,31 +310,16 @@ function parseQoderOutput(line: string): QoderParseOutcome {
   };
 }
 
-class QoderSession extends EventEmitter implements AgentSession {
-  private currentId: string;
-  private child?: ChildProcessWithoutNullStreams;
-  private alive = true;
-  private sending = false;
+class QoderSession extends BaseCliSession implements AgentSession {
+  private readonly messageState = new Map<string, string>();
+  private readonly transientKeys = new Set<string>();
 
   constructor(
-    private readonly logger: Logger,
-    private readonly buildInvocation: (prompt: string, sessionId: string) => Invocation,
+    logger: Logger,
+    private readonly invocationBuilder: (prompt: string, sessionId: string) => Invocation,
     sessionId?: string,
   ) {
-    super();
-    this.currentId = typeof sessionId === "string" ? sessionId.trim() : "";
-  }
-
-  currentSessionId(): string {
-    return this.currentId;
-  }
-
-  isAlive(): boolean {
-    return this.alive;
-  }
-
-  async respondPermission(_requestId: string, _result: PermissionResult): Promise<void> {
-    // v1 保持兼容性：暂不支持交互式 approve/deny
+    super(logger, sessionId);
   }
 
   private eventFingerprint(event: AgentEvent): string {
@@ -448,20 +410,29 @@ class QoderSession extends EventEmitter implements AgentSession {
     return events;
   }
 
-  private emitEvents(events: AgentEvent[], transcript: { value: string }, sawResult: { value: boolean }): void {
+  protected providerName(): string {
+    return "qoder";
+  }
+
+  protected buildInvocation(prompt: string, sessionId: string): Invocation {
+    return this.invocationBuilder(prompt, sessionId);
+  }
+
+  protected parseOutputLine(source: "stdout" | "stderr", line: string): AgentEvent[] {
+    this.logger.debug("qoder output line", {
+      source,
+      sessionId: this.currentId,
+      line: previewText(line, 1000),
+    });
+    const outcome = parseQoderOutput(line);
+    return this.dedupeEvents(outcome.events, outcome.messageId, this.messageState, this.transientKeys);
+  }
+
+  protected emitEvents(events: AgentEvent[], transcript: { value: string }, sawResult: { value: boolean }): void {
     for (const event of events) {
-      if (event.sessionId) {
-        this.currentId = event.sessionId;
-      }
-      if (event.content && event.content.trim().length > 0) {
-        transcript.value += `${event.content}\n`;
-      }
-      if (event.type === "result") {
-        sawResult.value = true;
-      }
       this.logger.debug("qoder event", summarizeEventForLog(event));
-      this.emit("event", event);
     }
+    super.emitEvents(events, transcript, sawResult);
   }
 
   async send(prompt: string): Promise<void> {
@@ -475,128 +446,23 @@ class QoderSession extends EventEmitter implements AgentSession {
     this.sending = true;
 
     try {
-      const invocation = this.buildInvocation(prompt, this.currentId);
-      this.logger.debug("spawn qoder", {
-        cmd: invocation.cmd,
-        args: invocation.args,
-      });
-
-      const child = spawn(invocation.cmd, invocation.args, {
-        cwd: invocation.cwd ?? process.cwd(),
-        env: { ...process.env, ...(invocation.env ?? {}) },
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-      this.child = child;
-
-      if (invocation.stdinPrompt) {
-        child.stdin.write(`${prompt}\n`);
+      this.messageState.clear();
+      this.transientKeys.clear();
+      try {
+        await this.runOnce(prompt, this.currentId);
+      } catch (error) {
+        const message = (error as Error).message;
+        this.emit("event", {
+          type: "error",
+          content: message,
+          done: true,
+        } satisfies AgentEvent);
+        throw error;
       }
-      child.stdin.end();
-
-      const transcript = { value: "" };
-      const sawResult = { value: false };
-      const messageState = new Map<string, string>();
-      const transientKeys = new Set<string>();
-      const stdoutLineBuffer = { value: "" };
-      const stderrLineBuffer = { value: "" };
-      let stdoutBuffer = "";
-      let stderrBuffer = "";
-
-      const onChunk = (source: "stdout" | "stderr", chunk: Buffer): void => {
-        const text = chunk.toString("utf8");
-        const lines = source === "stdout"
-          ? extractLines(stdoutLineBuffer, text)
-          : extractLines(stderrLineBuffer, text);
-        for (const line of lines) {
-          this.logger.debug("qoder output line", {
-            source,
-            sessionId: this.currentId,
-            line: previewText(line, 1000),
-          });
-          const outcome = parseQoderOutput(line);
-          const events = this.dedupeEvents(outcome.events, outcome.messageId, messageState, transientKeys);
-          this.emitEvents(events, transcript, sawResult);
-        }
-      };
-
-      child.stdout.on("data", (chunk: Buffer) => {
-        stdoutBuffer += chunk.toString("utf8");
-        onChunk("stdout", chunk);
-      });
-
-      child.stderr.on("data", (chunk: Buffer) => {
-        stderrBuffer += chunk.toString("utf8");
-        onChunk("stderr", chunk);
-      });
-
-      await new Promise<void>((resolve, reject) => {
-        child.once("error", reject);
-        child.once("close", (code) => {
-          for (const line of flushBufferedLine(stdoutLineBuffer)) {
-            this.logger.debug("qoder output line", {
-              source: "stdout",
-              sessionId: this.currentId,
-              line: previewText(line, 1000),
-            });
-            const outcome = parseQoderOutput(line);
-            const events = this.dedupeEvents(outcome.events, outcome.messageId, messageState, transientKeys);
-            this.emitEvents(events, transcript, sawResult);
-          }
-
-          for (const line of flushBufferedLine(stderrLineBuffer)) {
-            this.logger.debug("qoder output line", {
-              source: "stderr",
-              sessionId: this.currentId,
-              line: previewText(line, 1000),
-            });
-            const outcome = parseQoderOutput(line);
-            const events = this.dedupeEvents(outcome.events, outcome.messageId, messageState, transientKeys);
-            this.emitEvents(events, transcript, sawResult);
-          }
-
-          const fullTranscript = `${stdoutBuffer}\n${stderrBuffer}`.trim();
-          if (fullTranscript.length > 0) {
-            this.logger.debug("qoder process output", {
-              sessionId: this.currentId,
-              outputPreview: previewText(fullTranscript, 2000),
-            });
-          }
-          if (!sawResult.value && transcript.value.trim().length > 0) {
-            this.emitEvents([{ type: "result", content: transcript.value.trim(), done: true }], transcript, sawResult);
-          }
-
-          if (code && code !== 0) {
-            const details = fullTranscript.length > 0 ? fullTranscript.slice(0, 4000) : "no output";
-            const message = `qoder process exited with code ${code}: ${details}`;
-            this.logger.error("qoder process failed", {
-              code,
-              details,
-            });
-            this.emit("event", {
-              type: "error",
-              content: message,
-              done: true,
-            } satisfies AgentEvent);
-            reject(new Error(message));
-            return;
-          }
-
-          resolve();
-        });
-      });
     } finally {
       this.child = undefined;
       this.sending = false;
     }
-  }
-
-  async close(): Promise<void> {
-    this.alive = false;
-    if (this.child && !this.child.killed) {
-      this.child.kill("SIGTERM");
-    }
-    this.child = undefined;
-    this.emit("close");
   }
 }
 

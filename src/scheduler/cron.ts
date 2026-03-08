@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import cron from "node-cron";
 import { writeJsonAtomic, ensureDir } from "../infra/store-json/atomic.js";
-import type { CronExecutor, CronJob } from "../runtime/types.js";
+import type { CronJob, JobExecutor } from "../core/types.js";
 import { Logger } from "../logging.js";
 
 interface CronSnapshot {
@@ -73,7 +73,7 @@ export class CronStore {
 
 export class CronScheduler {
   private readonly tasks = new Map<string, cron.ScheduledTask>();
-  private readonly executors = new Map<string, CronExecutor>();
+  private readonly executors = new Map<string, JobExecutor>();
 
   constructor(
     private readonly store: CronStore,
@@ -81,7 +81,7 @@ export class CronScheduler {
     private readonly defaultSilent = false,
   ) {}
 
-  registerExecutor(project: string, executor: CronExecutor): void {
+  registerExecutor(project: string, executor: JobExecutor): void {
     this.executors.set(project, executor);
   }
 
@@ -168,7 +168,7 @@ export class CronScheduler {
     const silent = job.silent ?? this.defaultSilent;
 
     try {
-      await executor.executeCronJob({
+      await executor.executeJob({
         ...job,
         silent,
       });

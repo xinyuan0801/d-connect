@@ -18,6 +18,7 @@ describe("init config", () => {
       platformType: "dingtalk" as const,
       dingtalkClientId: "ding123",
       dingtalkClientSecret: "secret123",
+      dingtalkProcessingNotice: "处理中...",
       allowFrom: "u1,u2",
     };
 
@@ -35,6 +36,7 @@ describe("init config", () => {
         clientId: "ding123",
         clientSecret: "secret123",
         allowFrom: "u1,u2",
+        processingNotice: "处理中...",
       },
     });
   });

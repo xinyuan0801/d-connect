@@ -1,0 +1,144 @@
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { parse as parseUrl } from "node:url";
+import { Logger } from "../logging/logger.js";
+import { CronScheduler } from "../../scheduler/cron.js";
+import { RuntimeEngine } from "../../runtime/engine.js";
+import {
+  cronAddRequestSchema,
+  cronDelRequestSchema,
+  sendRequestSchema,
+  type IpcResult,
+  type SendResponse,
+} from "../../ipc/types.js";
+
+interface IpcRouteContext {
+  runtime: RuntimeEngine;
+  cron: CronScheduler;
+  logger: Logger;
+}
+
+interface IpcRequest {
+  req: IncomingMessage;
+  res: ServerResponse;
+  method: string;
+  path: string;
+  query: Record<string, unknown>;
+}
+
+interface IpcRoute {
+  method: string;
+  path: string;
+  handle(request: IpcRequest, context: IpcRouteContext): Promise<void>;
+}
+
+async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    chunks.push(Buffer.from(chunk));
+  }
+  if (chunks.length === 0) {
+    return {};
+  }
+  const raw = Buffer.concat(chunks).toString("utf8").trim();
+  if (!raw) {
+    return {};
+  }
+  return JSON.parse(raw);
+}
+
+function writeJson<T>(res: ServerResponse, statusCode: number, payload: IpcResult<T>): void {
+  res.statusCode = statusCode;
+  res.setHeader("content-type", "application/json; charset=utf-8");
+  res.end(`${JSON.stringify(payload)}\n`);
+}
+
+export function createIpcRouter(context: IpcRouteContext) {
+  const routes: IpcRoute[] = [
+    {
+      method: "POST",
+      path: "/send",
+      async handle(request, routeContext) {
+        const body = sendRequestSchema.parse(await readJsonBody(request.req));
+        const result = await routeContext.runtime.send(body);
+        const payload: SendResponse = {
+          project: result.project,
+          sessionKey: result.sessionKey,
+          sessionId: result.sessionId,
+          response: result.response,
+        };
+        writeJson(request.res, 200, { ok: true, data: payload });
+      },
+    },
+    {
+      method: "POST",
+      path: "/cron/add",
+      async handle(request, routeContext) {
+        const body = cronAddRequestSchema.parse(await readJsonBody(request.req));
+        const job = await routeContext.cron.addJob({
+          project: body.project,
+          sessionKey: body.sessionKey,
+          cronExpr: body.cronExpr,
+          prompt: body.prompt,
+          description: body.description,
+          silent: body.silent,
+        });
+        writeJson(request.res, 200, { ok: true, data: job });
+      },
+    },
+    {
+      method: "GET",
+      path: "/cron/list",
+      async handle(request, routeContext) {
+        const project = typeof request.query.project === "string" ? request.query.project : undefined;
+        const jobs = routeContext.cron.list(project);
+        writeJson(request.res, 200, { ok: true, data: { jobs } });
+      },
+    },
+    {
+      method: "POST",
+      path: "/cron/del",
+      async handle(request, routeContext) {
+        const body = cronDelRequestSchema.parse(await readJsonBody(request.req));
+        const ok = await routeContext.cron.removeJob(body.id);
+        writeJson(request.res, 200, { ok: true, data: { deleted: ok, id: body.id } });
+      },
+    },
+  ];
+
+  return {
+    async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+      try {
+        const method = req.method ?? "GET";
+        const parsed = parseUrl(req.url ?? "", true);
+        const path = parsed.pathname ?? "/";
+        const route = routes.find((item) => item.method === method && item.path === path);
+        if (!route) {
+          writeJson(res, 404, {
+            ok: false,
+            error: `route not found: ${method} ${path}`,
+          });
+          return;
+        }
+
+        await route.handle(
+          {
+            req,
+            res,
+            method,
+            path,
+            query: parsed.query,
+          },
+          context,
+        );
+      } catch (error) {
+        context.logger.warn("ipc request failed", {
+          error: (error as Error).message,
+        });
+        writeJson(res, 400, {
+          ok: false,
+          error: (error as Error).message,
+        });
+      }
+    },
+  };
+}

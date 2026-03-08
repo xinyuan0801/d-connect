@@ -40,17 +40,27 @@ pnpm run dev cron list -p <project>
 
 ## 目录结构
 
-- `src/index.ts`：CLI 入口，定义 `init`、`start`、`send`、`cron` 命令。
-- `src/app.ts`：应用启动编排，负责加载配置、初始化日志、runtime、IPC、cron。
-- `src/config/**`：配置路径解析、模板生成、Zod schema 校验。
-- `src/runtime/**`：核心运行时，负责项目实例、会话缓存、消息收发、事件格式化。
-- `src/adapters/agent/**`：各类 Agent CLI 适配器与输出解析。
-- `src/adapters/platform/**`：IM 平台适配器，目前为 DingTalk / Feishu。
-- `src/ipc/**`：本地 Unix Socket IPC server/client。
-- `src/scheduler/cron.ts`：定时任务调度与持久化编排。
-- `src/infra/store-json/**`：JSON 文件原子写入等基础设施。
+- `src/bootstrap/**`：CLI 入口装配、daemon 启动编排、信号处理。
+- `src/core/**`：运行时契约与共享类型，如 `InboundMessage`、`DeliveryTarget`、`JobExecutor`。
+- `src/services/**`：项目注册、会话编排、命令处理、消息 relay。
+- `src/config/**`：配置路径解析、模板生成、Zod schema 校验与 normalize。
+- `src/adapters/agent/**`：各类 Agent CLI 适配器、共享 `BaseCliSession`、输出解析。
+- `src/adapters/platform/**`：IM 平台适配器，以及平台共享的 allow-list / delivery-target 能力。
+- `src/ipc/**`：对外 IPC server/client；路由表位于 `src/infra/ipc/router.ts`。
+- `src/scheduler/cron.ts`：定时任务调度与持久化编排，依赖 `JobExecutor` 接口。
+- `src/infra/**`：logging、JSON 文件原子写入、IPC router 等基础设施。
 - `tests/**`：Vitest 测试，整体以模块级单测为主。
 - `dist/**`：构建产物，不作为人工修改入口。
+
+关键调用链：
+
+1. `src/index.ts` -> `src/bootstrap/cli.ts`
+2. `start` -> `src/bootstrap/daemon.ts`
+3. `daemon` 装配 `RuntimeEngine`、`CronScheduler`、`IpcServer`
+4. `RuntimeEngine` 内部委托 `DaemonRuntime`
+5. `DaemonRuntime` -> `ProjectRegistry` / `ConversationService` / `CommandService` / `MessageRelay`
+6. 平台入站消息统一转换成 `InboundMessage`
+7. 异步回投使用持久化 `DeliveryTarget`，不再依赖进程内存中的 reply context
 
 ## 代码约定
 
@@ -72,7 +82,7 @@ pnpm run dev cron list -p <project>
 4. `src/adapters/agent/parsers.ts`（如果输出格式有差异）
 5. 相关测试
 
-优先复用 `src/adapters/agent/base-cli.ts` 的 one-shot CLI 执行模型，除非新的 Agent 明确需要不同生命周期。
+优先复用 `src/adapters/agent/shared/base-cli-session.ts` 的 one-shot CLI 执行骨架，除非新的 Agent 明确需要不同生命周期。
 
 ### 新增 IM 平台支持
 
@@ -81,8 +91,14 @@ pnpm run dev cron list -p <project>
 1. `src/config/schema.ts`
 2. `src/adapters/platform/index.ts`
 3. `src/adapters/platform/<name>.ts`
-4. `src/runtime/engine.ts`（仅在平台语义确实不同的时候）
+4. `src/core/types.ts`（新增平台若需要新的通用契约时）
 5. 相关测试
+
+新增平台时，优先复用：
+
+- `src/adapters/platform/shared/allow-list.ts`
+- `src/adapters/platform/shared/delivery-target.ts`
+- `PlatformAdapter.send()` 的异步回投语义
 
 ### 修改配置结构
 
@@ -114,6 +130,18 @@ pnpm run build
 - 本地调试优先使用 `local:<name>` 这样的 `sessionKey`，先验证 runtime/IPC/cron，再接入真实 IM。
 - 守护进程依赖 `dataDir/ipc.sock`；排查 IPC 问题时先确认 `start` 是否已成功启动。
 - 若看到 `session is busy`，说明同一会话仍在处理上一条请求，不要把它误判为进程卡死。
+- `cron` 回投依赖某个 `sessionKey` 最近一次成功建立的 `DeliveryTarget`；该信息持久化在 `dataDir/sessions/sessions.json`。
+- 若守护进程重启后 `cron` 不回投，先确认该 `sessionKey` 是否收到过真实平台消息，以及平台是否支持 `send()` 异步发送。
+
+### DingTalk 排障经验
+
+- DingTalk 机器人消息走的是 `CALLBACK`，不是普通 `EVENT`。接入时应使用 `registerCallbackListener(TOPIC_ROBOT, ...)`，否则 websocket 已连接也收不到机器人消息。
+- DingTalk `CALLBACK` 需要显式回执。若收到消息后没有调用 `client.socketCallBackResponse(downstream.headers.messageId, "")`，平台通常会在约 60 秒后重投同一条消息，表现为“用户只发了一次，但被消费两次”。
+- DingTalk 去重窗口要明显长于平台重投窗口。当前实现按 `msgId` 去重，TTL 设为 10 分钟；若只配 60 秒，容易与 callback 重投时间撞上，导致同一消息再次穿透。
+- 排查“重复消费”时，优先同时看两个 ID：业务消息 ID `raw.msgId` 和 stream 层消息 ID `downstream.headers.messageId`。日志里最好同时打印 `conversationId`、`userId` 和内容预览，便于区分“平台重投同一消息”与“用户真的又发了一次”。
+- 排查“看起来串 session”时，不要只看钉钉聊天窗口。钉钉没有 thread 视图，多个逻辑 session 的回复会落在同一时间线里；应以 `dataDir/sessions/sessions.json` 中的 `activeSession`、各 session 独立 history、`agentSessionId` 为准，先判断是 UI 交错还是后端真的混写。
+- DingTalk 的 `sessionWebhook` 是临时发送目标，必须结合 `sessionWebhookExpiredTime` 使用。异步回投或 cron 不生效时，先检查持久化的 `DeliveryTarget` 是否已过期；过期后只能靠新的真实 DingTalk 消息刷新。
+- 若日志显示 `dingtalk stream connected` 但没有任何入站处理，先核对三件事：是否订阅了 `TOPIC_ROBOT` callback、allow-list 是否放行当前用户、消息类型是否为当前支持的 `text`。
 
 ## 对后续 Agent 的要求
 

@@ -1,29 +1,16 @@
-import { EventEmitter } from "node:events";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { Logger } from "../../logging.js";
 import {
   parseAgentLine,
 } from "./parsers.js";
-import type { AgentAdapter, AgentEvent, AgentSession, ModelSwitchable, ModeSwitchable, PermissionResult } from "../../runtime/types.js";
+import type { AgentAdapter, AgentEvent, AgentSession, ModelSwitchable, ModeSwitchable } from "../../runtime/types.js";
 import type { BaseAgentOptions } from "./options.js";
+import { BaseCliSession, type Invocation } from "./shared/base-cli-session.js";
 
 type RawRecord = Record<string, unknown>;
 
 type ClaudePermissionMode = "default" | "acceptEdits" | "plan" | "bypassPermissions";
 
 const NO_CONVERSATION_ERROR_PATTERN = /no conversation found with session id/i;
-
-interface Invocation {
-  cmd: string;
-  args: string[];
-  stdinPrompt: boolean;
-  cwd?: string;
-  env?: Record<string, string>;
-}
-
-function splitLines(buffer: string): string[] {
-  return buffer.split(/\r?\n/).filter((line) => line.trim().length > 0);
-}
 
 function asRecord(value: unknown): RawRecord | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -253,46 +240,25 @@ function mergeEnv(extraEnv: Record<string, string> | undefined): Record<string, 
   return env;
 }
 
-class ClaudeCodeSession extends EventEmitter implements AgentSession {
-  private currentId: string;
-  private child?: ChildProcessWithoutNullStreams;
-  private alive = true;
-  private sending = false;
-
+class ClaudeCodeSession extends BaseCliSession implements AgentSession {
   constructor(
-    private readonly logger: Logger,
-    private readonly buildInvocation: (prompt: string, sessionId: string) => Invocation,
+    logger: Logger,
+    private readonly invocationBuilder: (prompt: string, sessionId: string) => Invocation,
     sessionId?: string,
   ) {
-    super();
-    this.currentId = typeof sessionId === "string" ? sessionId.trim() : "";
+    super(logger, sessionId);
   }
 
-  currentSessionId(): string {
-    return this.currentId;
+  protected providerName(): string {
+    return "claudecode";
   }
 
-  isAlive(): boolean {
-    return this.alive;
+  protected buildInvocation(prompt: string, sessionId: string): Invocation {
+    return this.invocationBuilder(prompt, sessionId);
   }
 
-  async respondPermission(_requestId: string, _result: PermissionResult): Promise<void> {
-    // v1 保持兼容性：暂不支持交互式 approve/deny
-  }
-
-  private emitEvents(events: AgentEvent[], transcript: { value: string }, sawResult: { value: boolean }): void {
-    for (const event of events) {
-      if (event.sessionId) {
-        this.currentId = event.sessionId;
-      }
-      if (event.content && event.content.trim().length > 0) {
-        transcript.value += `${event.content}\n`;
-      }
-      if (event.type === "result") {
-        sawResult.value = true;
-      }
-      this.emit("event", event);
-    }
+  protected parseOutputLine(_source: "stdout" | "stderr", line: string): AgentEvent[] {
+    return parseClaudeOutput(line);
   }
 
   async send(prompt: string): Promise<void> {
@@ -304,80 +270,9 @@ class ClaudeCodeSession extends EventEmitter implements AgentSession {
     }
 
     this.sending = true;
-    const runInvocation = async (sessionId: string): Promise<void> => {
-      const invocation = this.buildInvocation(prompt, sessionId);
-      this.logger.debug("spawn claudecode", {
-        cmd: invocation.cmd,
-        args: invocation.args,
-      });
-
-      const child = spawn(invocation.cmd, invocation.args, {
-        cwd: invocation.cwd ?? process.cwd(),
-        env: invocation.env,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-      this.child = child;
-
-      if (invocation.stdinPrompt) {
-        child.stdin.write(`${prompt}\n`);
-      }
-      child.stdin.end();
-
-      const transcript = { value: "" };
-      const sawResult = { value: false };
-      let stdoutBuffer = "";
-      let stderrBuffer = "";
-
-      const onChunk = (chunk: Buffer): void => {
-        const lines = splitLines(chunk.toString("utf8"));
-        for (const line of lines) {
-          const events = parseClaudeOutput(line);
-          this.emitEvents(events, transcript, sawResult);
-        }
-      };
-
-      child.stdout.on("data", (chunk: Buffer) => {
-        stdoutBuffer += chunk.toString("utf8");
-        onChunk(chunk);
-      });
-      child.stderr.on("data", (chunk: Buffer) => {
-        stderrBuffer += chunk.toString("utf8");
-        onChunk(chunk);
-      });
-
-      const exitCode = await new Promise<number>((resolve, reject) => {
-        child.once("error", reject);
-        child.once("close", (code) => {
-          const fullTranscript = `${stdoutBuffer}\n${stderrBuffer}`.trim();
-          if (!sawResult.value && transcript.value.trim().length > 0) {
-            this.emitEvents([{ type: "result", content: transcript.value.trim(), done: true }], transcript, sawResult);
-          }
-
-          if (fullTranscript.length > 0) {
-            this.logger.debug("claudecode process output", {
-              sessionId,
-              outputPreview: fullTranscript.slice(0, 2000),
-            });
-          }
-          resolve(code ?? 0);
-        });
-      });
-
-      if (exitCode && exitCode !== 0) {
-        const fullTranscript = `${stdoutBuffer}\n${stderrBuffer}`.trim();
-        const details = fullTranscript.length > 0 ? fullTranscript.slice(0, 4000) : "no output";
-        const message = `claudecode process exited with code ${exitCode}: ${details}`;
-        this.logger.error("claudecode process failed", {
-          code: exitCode,
-          details,
-        });
-        throw new Error(message);
-      }
-    };
-
     try {
       try {
-        await runInvocation(this.currentId);
+        await this.runOnce(prompt, this.currentId);
       } catch (error) {
         const message = (error as Error).message;
         if (!NO_CONVERSATION_ERROR_PATTERN.test(message)) {
@@ -394,7 +289,7 @@ class ClaudeCodeSession extends EventEmitter implements AgentSession {
         });
         this.currentId = "";
         try {
-          await runInvocation(this.currentId);
+          await this.runOnce(prompt, this.currentId);
         } catch (retryError) {
           const retryMessage = (retryError as Error).message;
           this.emit("event", {
@@ -409,15 +304,6 @@ class ClaudeCodeSession extends EventEmitter implements AgentSession {
       this.child = undefined;
       this.sending = false;
     }
-  }
-
-  async close(): Promise<void> {
-    this.alive = false;
-    if (this.child && !this.child.killed) {
-      this.child.kill("SIGTERM");
-    }
-    this.child = undefined;
-    this.emit("close");
   }
 }
 

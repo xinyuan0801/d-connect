@@ -1,10 +1,10 @@
-import type { ProjectConfig } from "../../config/schema.js";
+import type { ResolvedProjectConfig } from "../../config/normalize.js";
 import { Logger } from "../../logging.js";
-import type { PlatformAdapter } from "../../runtime/types.js";
+import type { PlatformAdapter } from "../../core/types.js";
 import { DingTalkAdapter, type DingTalkOptions } from "./dingtalk.js";
 import { FeishuAdapter, type FeishuOptions } from "./feishu.js";
 
-export function createPlatformAdapters(project: ProjectConfig, logger: Logger): PlatformAdapter[] {
+export function createPlatformAdapters(project: ResolvedProjectConfig, logger: Logger): PlatformAdapter[] {
   const adapters: PlatformAdapter[] = [];
   for (const platform of project.platforms) {
     switch (platform.type) {

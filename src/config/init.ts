@@ -25,6 +25,7 @@ export interface InitAnswers {
   allowFrom: string;
   dingtalkClientId: string;
   dingtalkClientSecret: string;
+  dingtalkProcessingNotice: string;
   feishuAppId: string;
   feishuAppSecret: string;
   feishuGroupReplyAll: boolean;
@@ -88,6 +89,7 @@ export function defaultInitAnswers(opts: { cwd?: string; homeDir?: string } = {}
     allowFrom: "*",
     dingtalkClientId: "dingxxxx",
     dingtalkClientSecret: "xxxx",
+    dingtalkProcessingNotice: "处理中...",
     feishuAppId: "cli_xxx",
     feishuAppSecret: "xxx",
     feishuGroupReplyAll: false,
@@ -105,6 +107,7 @@ export function buildConfigFromAnswers(answers: InitAnswers): AppConfig {
     allowFrom: toNonEmpty(answers.allowFrom, "allowFrom"),
     dingtalkClientId: answers.dingtalkClientId.trim(),
     dingtalkClientSecret: answers.dingtalkClientSecret.trim(),
+    dingtalkProcessingNotice: answers.dingtalkProcessingNotice.trim(),
     feishuAppId: answers.feishuAppId.trim(),
     feishuAppSecret: answers.feishuAppSecret.trim(),
     feishuReactionEmoji: answers.feishuReactionEmoji.trim(),
@@ -132,6 +135,7 @@ export function buildConfigFromAnswers(answers: InitAnswers): AppConfig {
             clientId: toNonEmpty(normalized.dingtalkClientId, "dingtalkClientId"),
             clientSecret: toNonEmpty(normalized.dingtalkClientSecret, "dingtalkClientSecret"),
             allowFrom: normalized.allowFrom,
+            processingNotice: toNonEmpty(normalized.dingtalkProcessingNotice, "dingtalkProcessingNotice"),
           },
         }
       : {

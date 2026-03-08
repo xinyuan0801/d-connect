@@ -19,6 +19,12 @@ describe("session store", () => {
 
     store.addHistory(session, "user", "hello");
     store.addHistory(session, "assistant", "world");
+    store.setDeliveryTarget("project:user", {
+      platform: "feishu",
+      payload: {
+        chatId: "oc_123",
+      },
+    });
     await store.save();
 
     const restored = await createSessionStore(dataDir);
@@ -26,5 +32,11 @@ describe("session store", () => {
     expect(loaded.history).toHaveLength(2);
     expect(loaded.history[0]?.content).toBe("hello");
     expect(loaded.history[1]?.content).toBe("world");
+    expect(restored.getDeliveryTarget("project:user")).toEqual({
+      platform: "feishu",
+      payload: {
+        chatId: "oc_123",
+      },
+    });
   });
 });

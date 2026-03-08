@@ -4,12 +4,12 @@ import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { createCronStore, CronScheduler } from "../src/scheduler/cron.js";
 import { Logger } from "../src/logging.js";
-import type { CronExecutor, CronJob } from "../src/runtime/types.js";
+import type { CronJob, JobExecutor } from "../src/runtime/types.js";
 
-class MockExecutor implements CronExecutor {
+class MockExecutor implements JobExecutor {
   public calls: CronJob[] = [];
 
-  async executeCronJob(job: CronJob): Promise<void> {
+  async executeJob(job: CronJob): Promise<void> {
     this.calls.push(job);
   }
 }

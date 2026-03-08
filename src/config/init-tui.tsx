@@ -141,6 +141,7 @@ function draftToAnswers(draft: WizardDraft, options: RunInitTuiOptions): InitAns
     allowFrom: (draft.allowFrom ?? options.defaults.allowFrom).trim(),
     dingtalkClientId: (draft.dingtalkClientId ?? options.defaults.dingtalkClientId).trim(),
     dingtalkClientSecret: (draft.dingtalkClientSecret ?? options.defaults.dingtalkClientSecret).trim(),
+    dingtalkProcessingNotice: (draft.dingtalkProcessingNotice ?? options.defaults.dingtalkProcessingNotice).trim(),
     feishuAppId: (draft.feishuAppId ?? options.defaults.feishuAppId).trim(),
     feishuAppSecret: (draft.feishuAppSecret ?? options.defaults.feishuAppSecret).trim(),
     feishuGroupReplyAll: parseBoolean(draft.feishuGroupReplyAll, options.defaults.feishuGroupReplyAll),
@@ -279,6 +280,15 @@ function buildSteps(draft: WizardDraft, options: RunInitTuiOptions): WizardStep[
         label: "platform.options.clientSecret",
         required: true,
         defaultValue: options.defaults.dingtalkClientSecret,
+      },
+      {
+        id: "dingtalkProcessingNotice",
+        kind: "text",
+        title: "钉钉处理中提示",
+        label: "platform.options.processingNotice",
+        hint: "处理超过短延迟时发送；填写 \"none\" 可关闭。",
+        required: true,
+        defaultValue: options.defaults.dingtalkProcessingNotice,
       },
     );
   } else {

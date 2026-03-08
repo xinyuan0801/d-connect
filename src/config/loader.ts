@@ -67,6 +67,7 @@ function defaultConfigTemplate(): AppConfig {
               clientId: "dingxxxx",
               clientSecret: "xxxx",
               allowFrom: "*",
+              processingNotice: "处理中...",
             },
           },
         ],

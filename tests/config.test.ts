@@ -2,7 +2,7 @@ import { mkdtemp, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { loadConfig, resolveConfigPath } from "../src/config/index.js";
+import { loadConfig, normalizeConfig, resolveConfigPath } from "../src/config/index.js";
 
 function validConfigJson(dataDir: string): string {
   return JSON.stringify(
@@ -75,6 +75,9 @@ describe("config loader", () => {
     expect(cfg.configVersion).toBe(1);
     expect(cfg.projects).toHaveLength(1);
     expect(cfg.projects[0]?.agent.type).toBe("qoder");
+    expect(cfg.projects[0]?.platforms[0]?.options).toMatchObject({
+      processingNotice: "处理中...",
+    });
   });
 
   test("loadConfig supports feishu platform", async () => {
@@ -119,5 +122,28 @@ describe("config loader", () => {
     await writeFile(path, `${JSON.stringify(payload)}\n`, "utf8");
 
     await expect(loadConfig(path)).rejects.toThrow(/duplicate project name/i);
+  });
+
+  test("normalizeConfig keeps typed agent fields and passthrough extras", async () => {
+    const root = await mkdtemp(join(tmpdir(), "d-connect-config-"));
+    const path = join(root, "config.json");
+    const payload = JSON.parse(validConfigJson(join(root, "data")));
+    payload.projects[0].agent.options = {
+      cmd: "claude",
+      workDir: "/repo",
+      allowedTools: ["Read", "Write"],
+    };
+    payload.projects[0].agent.type = "claudecode";
+    await writeFile(path, `${JSON.stringify(payload)}\n`, "utf8");
+
+    const cfg = await loadConfig(path);
+    const resolved = normalizeConfig(cfg);
+
+    expect(resolved.projects[0]?.agent.options).toMatchObject({
+      cmd: "claude",
+      workDir: "/repo",
+      allowedTools: ["Read", "Write"],
+    });
+    expect(typeof resolved.dataDir).toBe("string");
   });
 });
