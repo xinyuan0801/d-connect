@@ -59,6 +59,9 @@ function defaultConfigTemplate(): AppConfig {
             cmd: "claude",
           },
         },
+        guard: {
+          enabled: false,
+        },
         platforms: [
           {
             type: "dingtalk",

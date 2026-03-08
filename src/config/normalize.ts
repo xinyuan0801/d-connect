@@ -18,10 +18,16 @@ export interface ResolvedAgentConfig {
   options: ResolvedAgentOptions;
 }
 
+export interface ResolvedGuardConfig {
+  enabled: boolean;
+  rules?: string;
+}
+
 export type ResolvedPlatformConfig = ProjectConfig["platforms"][number];
 
-export interface ResolvedProjectConfig extends Omit<ProjectConfig, "agent" | "platforms"> {
+export interface ResolvedProjectConfig extends Omit<ProjectConfig, "agent" | "platforms" | "guard"> {
   agent: ResolvedAgentConfig;
+  guard: ResolvedGuardConfig;
   platforms: ResolvedPlatformConfig[];
 }
 
@@ -61,6 +67,13 @@ function normalizePlatformConfig(platform: ProjectConfig["platforms"][number]): 
   };
 }
 
+function normalizeGuardConfig(project: ProjectConfig): ResolvedGuardConfig {
+  return {
+    enabled: project.guard.enabled,
+    rules: project.guard.rules,
+  };
+}
+
 export function resolveDataDir(configPath?: string, cwd = process.cwd()): string {
   const baseDir = configPath ? dirname(configPath) : cwd;
   if (basename(baseDir) === ".d-connect") {
@@ -79,6 +92,7 @@ export function normalizeConfig(config: AppConfig, options: NormalizeConfigOptio
         type: project.agent.type,
         options: normalizeAgentOptions(project.agent.options),
       },
+      guard: normalizeGuardConfig(project),
       platforms: project.platforms.map(normalizePlatformConfig),
     })),
   };

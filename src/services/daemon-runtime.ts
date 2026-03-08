@@ -6,6 +6,7 @@ import { MessageRelay } from "./message-relay.js";
 import { ProjectRegistry, type ProjectRuntime } from "./project-registry.js";
 import { ConversationService } from "./conversation-service.js";
 import { CommandService } from "./command-service.js";
+import { GuardService, buildGuardBlockedMessage } from "./guard-service.js";
 import { createSessionStore } from "../infra/store-json/session-store.js";
 import { LoopScheduler } from "../scheduler/loop.js";
 import type { AgentEvent } from "../core/types.js";
@@ -41,6 +42,7 @@ export class DaemonRuntime implements JobExecutor {
   private readonly relay = new MessageRelay();
   private readonly conversations: ConversationService;
   private readonly commandService: CommandService;
+  private readonly guardService: GuardService;
   private readonly sessions: SessionRepository;
   private started = false;
 
@@ -54,6 +56,7 @@ export class DaemonRuntime implements JobExecutor {
     this.registry = new ProjectRegistry(config, logger.child("runtime"));
     this.conversations = new ConversationService(sessions, logger.child("conversation"));
     this.commandService = new CommandService(this.conversations, loopScheduler);
+    this.guardService = new GuardService(logger.child("guard"));
   }
 
   static async create(config: ResolvedAppConfig, logger: Logger, loopScheduler?: LoopScheduler): Promise<DaemonRuntime> {
@@ -201,6 +204,36 @@ export class DaemonRuntime implements JobExecutor {
   }
 
   private async handlePlatformMessage(project: string, platformName: string, message: InboundMessage): Promise<void> {
+    const runtime = this.getProjectRuntime(project);
+    const platform = runtime.platformMap.get(platformName);
+    if (!platform) {
+      throw new Error(`platform not found for project ${project}: ${platformName}`);
+    }
+
+    if (runtime.config.guard?.enabled === true) {
+      const decision = await this.guardService.evaluate(runtime, {
+        project,
+        sessionKey: message.sessionKey,
+        userId: message.userId,
+        userName: message.userName,
+        content: message.content,
+      });
+
+      if (decision.action === "block") {
+        const response = buildGuardBlockedMessage(decision.reason);
+        this.logger.warn("platform message blocked by guard", {
+          project,
+          platform: platformName,
+          sessionKey: message.sessionKey,
+          userId: message.userId,
+          reason: decision.reason,
+          content: message.content,
+        });
+        await this.relay.reply(platform, message.replyContext, response);
+        return;
+      }
+    }
+
     await this.dispatch(
       {
         project,

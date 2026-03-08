@@ -14,6 +14,14 @@ const loopSchema = z
   .strict()
   .default({ silent: false });
 
+const guardSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    rules: z.string().trim().min(1).optional(),
+  })
+  .strict()
+  .default({ enabled: false });
+
 export const baseAgentOptionsSchema = z
   .object({
     cmd: z.string().min(1).optional(),
@@ -74,6 +82,7 @@ const feishuPlatformSchema = z.object({
 const projectSchema = z.object({
   name: z.string().min(1),
   agent: agentSchema,
+  guard: guardSchema,
   platforms: z.array(z.discriminatedUnion("type", [platformSchema, feishuPlatformSchema])).min(1),
 }).strict();
 

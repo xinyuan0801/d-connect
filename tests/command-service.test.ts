@@ -49,6 +49,9 @@ async function createHarness() {
         type: "claudecode",
         options: {},
       },
+      guard: {
+        enabled: false,
+      },
       platforms: [],
     },
     agent: new FakeAgent(),

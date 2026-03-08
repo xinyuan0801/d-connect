@@ -40,6 +40,9 @@ describe("init config", () => {
         processingNotice: "处理中...",
       },
     });
+    expect(config.projects[0]?.guard).toEqual({
+      enabled: false,
+    });
   });
 
   test("buildConfigFromAnswers builds feishu project config", () => {
@@ -77,6 +80,9 @@ describe("init config", () => {
         reactionEmoji: "OnIt",
       },
     });
+    expect(config.projects[0]?.guard).toEqual({
+      enabled: false,
+    });
   });
 
   test("inferProjectNameFromWorkDir sanitizes workspace name", () => {
@@ -112,6 +118,9 @@ describe("init config", () => {
     expect(parsed.projects[0]?.agent.options).toMatchObject({
       workDir: cwd,
       cmd: "claude",
+    });
+    expect(parsed.projects[0]?.guard).toEqual({
+      enabled: false,
     });
   });
 

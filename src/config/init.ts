@@ -159,6 +159,9 @@ export function buildConfigFromAnswers(answers: InitAnswers): AppConfig {
           type: normalized.agentType,
           options: agentOptions,
         },
+        guard: {
+          enabled: false,
+        },
         platforms: [platformOptions],
       },
     ],

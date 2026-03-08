@@ -68,6 +68,9 @@ describe("add config", () => {
           model: "claude-sonnet-4-20250514",
         },
       },
+      guard: {
+        enabled: false,
+      },
       platforms: [
         {
           type: "dingtalk",

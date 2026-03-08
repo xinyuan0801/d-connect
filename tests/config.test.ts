@@ -74,6 +74,9 @@ describe("config loader", () => {
     expect(cfg.configVersion).toBe(1);
     expect(cfg.projects).toHaveLength(1);
     expect(cfg.projects[0]?.agent.type).toBe("qoder");
+    expect(cfg.projects[0]?.guard).toEqual({
+      enabled: false,
+    });
     expect(cfg.projects[0]?.platforms[0]?.options).toMatchObject({
       processingNotice: "处理中...",
     });
@@ -153,7 +156,29 @@ describe("config loader", () => {
       workDir: "/repo",
       allowedTools: ["Read", "Write"],
     });
+    expect(resolved.projects[0]?.guard).toEqual({
+      enabled: false,
+    });
     expect(resolved.dataDir).toBe(join(root, ".d-connect"));
+  });
+
+  test("normalizeConfig preserves custom guard rules", async () => {
+    const root = await mkdtemp(join(tmpdir(), "d-connect-config-"));
+    const path = join(root, "config.json");
+    const payload = JSON.parse(validConfigJson());
+    payload.projects[0].guard = {
+      enabled: true,
+      rules: "禁止执行 deploy 或生产变更。",
+    };
+    await writeFile(path, `${JSON.stringify(payload)}\n`, "utf8");
+
+    const cfg = await loadConfig(path);
+    const resolved = normalizeConfig(cfg, { configPath: path });
+
+    expect(resolved.projects[0]?.guard).toEqual({
+      enabled: true,
+      rules: "禁止执行 deploy 或生产变更。",
+    });
   });
 
   test("normalizeConfig reuses config directory when config.json is already inside .d-connect", async () => {

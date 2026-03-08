@@ -16,13 +16,35 @@ class FakeSession extends EventEmitter implements AgentSession {
   private readonly id: string;
   public prompts: string[] = [];
 
-  constructor(id = "agent-session-1") {
+  constructor(
+    private readonly agent: FakeAgent,
+    id = "agent-session-1",
+  ) {
     super();
     this.id = id;
   }
 
   async send(prompt: string): Promise<void> {
     this.prompts.push(prompt);
+    if (prompt.includes("你是 d-connect 的入站消息安全 guard。")) {
+      this.agent.guardPrompts.push(prompt);
+      const shouldBlock =
+        prompt.includes('"deploy now"') ||
+        (prompt.includes("禁止任何 deploy 请求。") && prompt.includes('"please deploy"'));
+      this.emit("event", {
+        type: "result",
+        content: JSON.stringify(
+          shouldBlock
+            ? { action: "block", reason: "命中 guard 规则" }
+            : { action: "allow", reason: "安全" },
+        ),
+        sessionId: this.id,
+        done: true,
+      } satisfies AgentEvent);
+      return;
+    }
+
+    this.agent.conversationPrompts.push(prompt);
     this.emit("event", {
       type: "text",
       content: `echo:${prompt}`,
@@ -56,9 +78,11 @@ class FakeSession extends EventEmitter implements AgentSession {
 class FakeAgent implements AgentAdapter {
   readonly name = "fake-agent";
   public sessions: FakeSession[] = [];
+  public guardPrompts: string[] = [];
+  public conversationPrompts: string[] = [];
 
   async startSession(): Promise<AgentSession> {
-    const session = new FakeSession();
+    const session = new FakeSession(this);
     this.sessions.push(session);
     return session;
   }
@@ -276,6 +300,148 @@ describe("runtime integration", () => {
     expect(session?.prompts[0]).not.toContain("pnpm run dev");
     expect(session?.prompts[0]).toContain("用户请求：每天早上 9 点提醒我检查构建状态，规则用 0 0 9 * * *");
     expect(result.response).not.toContain("unknown /loop command");
+
+    await runtime.stop();
+  });
+
+  test("blocks inbound platform messages when guard denies them", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "d-connect-runtime-"));
+    const config = {
+      configVersion: 1,
+      dataDir,
+      log: { level: "error" as const },
+      loop: { silent: false },
+      projects: [
+        {
+          name: "demo",
+          agent: {
+            type: "claudecode" as const,
+            options: {
+              cmd: "fake",
+            },
+          },
+          guard: {
+            enabled: true,
+            rules: "禁止任何 deploy 请求。",
+          },
+          platforms: [
+            {
+              type: "feishu" as const,
+              options: {
+                appId: "app-id",
+                appSecret: "app-secret",
+                allowFrom: "*",
+                groupReplyAll: false,
+                reactionEmoji: "none",
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const runtime = new RuntimeEngine(config, new Logger("error"));
+    await runtime.start();
+
+    const platform = mockState.platformInstances[0] as FakePlatform | undefined;
+    const agent = mockState.agentInstances[0] as FakeAgent | undefined;
+
+    await platform?.deliver({
+      platform: "feishu",
+      sessionKey: "feishu:chat-1:user-1",
+      userId: "user-1",
+      userName: "User 1",
+      content: "please deploy",
+      replyContext: {
+        messageId: "om_block",
+        chatId: "chat-1",
+      },
+      deliveryTarget: {
+        platform: "feishu",
+        payload: {
+          chatId: "chat-1",
+        },
+      },
+    });
+
+    expect(agent?.guardPrompts).toHaveLength(1);
+    expect(agent?.guardPrompts[0]).toContain("禁止任何 deploy 请求。");
+    expect(agent?.conversationPrompts).toHaveLength(0);
+    expect(platform?.replies).toEqual([
+      {
+        replyContext: {
+          messageId: "om_block",
+          chatId: "chat-1",
+        },
+        content: "guard 已拦截本次消息：命中 guard 规则",
+      },
+    ]);
+
+    await runtime.stop();
+  });
+
+  test("allows inbound platform messages after guard passes", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "d-connect-runtime-"));
+    const config = {
+      configVersion: 1,
+      dataDir,
+      log: { level: "error" as const },
+      loop: { silent: false },
+      projects: [
+        {
+          name: "demo",
+          agent: {
+            type: "claudecode" as const,
+            options: {
+              cmd: "fake",
+            },
+          },
+          guard: {
+            enabled: true,
+          },
+          platforms: [
+            {
+              type: "feishu" as const,
+              options: {
+                appId: "app-id",
+                appSecret: "app-secret",
+                allowFrom: "*",
+                groupReplyAll: false,
+                reactionEmoji: "none",
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const runtime = new RuntimeEngine(config, new Logger("error"));
+    await runtime.start();
+
+    const platform = mockState.platformInstances[0] as FakePlatform | undefined;
+    const agent = mockState.agentInstances[0] as FakeAgent | undefined;
+
+    await platform?.deliver({
+      platform: "feishu",
+      sessionKey: "feishu:chat-1:user-1",
+      userId: "user-1",
+      userName: "User 1",
+      content: "hello",
+      replyContext: {
+        messageId: "om_allow",
+        chatId: "chat-1",
+      },
+      deliveryTarget: {
+        platform: "feishu",
+        payload: {
+          chatId: "chat-1",
+        },
+      },
+    });
+
+    expect(agent?.guardPrompts).toHaveLength(1);
+    expect(agent?.conversationPrompts).toEqual(["hello"]);
+    expect(platform?.replies.map((item) => item.content)).toEqual(["echo:hello", "done:hello"]);
 
     await runtime.stop();
   });
