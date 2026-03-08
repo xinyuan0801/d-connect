@@ -6,6 +6,9 @@ coverage/
 .vscode/
 .tmp/
 .run/
+.claude/
+.d-connect/
+.d-connect-local/
 config.json
 
 config.*.local.json

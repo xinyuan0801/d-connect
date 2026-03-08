@@ -1,15 +1,37 @@
 {
   "name": "d-connect",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
-  "description": "Bridge DingTalk to local coding agents",
+  "description": "Bridge local coding agents to DingTalk and Feishu",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xinyuan0801/d-connect.git"
+  },
+  "homepage": "https://github.com/xinyuan0801/d-connect#readme",
+  "bugs": {
+    "url": "https://github.com/xinyuan0801/d-connect/issues"
+  },
+  "keywords": [
+    "agent",
+    "cli",
+    "daemon",
+    "cron",
+    "dingtalk",
+    "feishu"
+  ],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "bin": {
     "d-connect": "./dist/index.js"
   },
   "scripts": {
     "build": "rm -rf dist && vite build && chmod +x dist/index.js",
     "dev": "tsx src/index.ts",
+    "prepublishOnly": "pnpm test && pnpm run build",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit"
