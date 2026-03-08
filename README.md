@@ -4,12 +4,37 @@
 
 `d-connect` 是一个运行在本机上的守护进程，用来把本地 Agent CLI 桥接到 IM 平台。
 
-你在 `DingTalk` 或 `Feishu` 里发消息，`d-connect` 会把消息转给本机 Agent 处理，再把结果回投到原聊天窗口。它同时负责多项目路由、逻辑 session、异步回投和 loop 定时任务。
-
 ## 它解决什么问题
 
 - 在 IM 里直接让本地 Agent 看代码、改代码、回答问题。
 - 把巡检、日报、提醒等任务交给 loop 定时执行，并自动回投聊天窗口。
+
+## 功能展示
+
+<table>
+  <tr>
+    <td align="center" valign="top" width="25%">
+      <strong>定时任务</strong><br />
+      <sub>聊天内直接发送 <code>/loop</code>，把自然语言需求转成可执行的定时任务。</sub><br /><br />
+      <img src="https://github.com/user-attachments/assets/ffd4b955-e8c0-4123-ad51-9c1de46fd838" alt="定时任务" width="180" />
+    </td>
+    <td align="center" valign="top" width="25%">
+      <strong>语音输入</strong><br />
+      <sub>语音识别结果自动纳入同一会话流程，适合移动端快速提问。</sub><br /><br />
+      <img src="https://github.com/user-attachments/assets/0f9f89f8-0ff4-4bdb-8b77-bf805729b246" alt="支持语音输入" width="180" />
+    </td>
+    <td align="center" valign="top" width="25%">
+      <strong>图片识别与理解</strong><br />
+      <sub>直接发图给 Agent，适合看图说明、读截图排障等场景。</sub><br /><br />
+      <img src="https://github.com/user-attachments/assets/6315f6ea-45c1-453b-9054-f775c6ad7833" alt="图片识别" width="180" />
+    </td>
+    <td align="center" valign="top" width="25%">
+      <strong>Guard 安全拦截</strong><br />
+      <sub>支持按项目开启 Guard，在请求进入 Agent 前拦截敏感内容。</sub><br /><br />
+      <img src="https://github.com/user-attachments/assets/1d3bedb5-62cf-40c2-8624-17e5154b7a6c" alt="可配置 guard 拦截" width="180" />
+    </td>
+  </tr>
+</table>
   
 ## 当前支持
 
@@ -18,8 +43,6 @@
 | IM 平台 | `DingTalk`、`Feishu` |
 | Agent CLI | `claudecode`、`qoder`、`iflow` |
 | 运行环境 | Node.js `>=22` |
-| 配置格式 | 严格 `JSON` |
-| 包管理 | 仓库使用 `pnpm` |
 
 ## 5 分钟跑通
 
@@ -53,32 +76,6 @@ d-connect start
 ```
 
 进程启动成功后，你便可以通过钉钉和你本地的 coding agent 对话
-
-## 功能展示
-
-### 1. 定时任务
-
-可以在聊天里直接发送 `/loop` 请求，把自然语言需求转成可执行的定时任务。
-
-<img width="603" height="1311" alt="定时任务" src="https://github.com/user-attachments/assets/ffd4b955-e8c0-4123-ad51-9c1de46fd838" />
-
-### 2. 语音输入
-
-支持把语音识别结果纳入同一会话流程，适合移动端快速提问，不需要手打长文本。
-
-<img width="603" height="1311" alt="支持语音输入" src="https://github.com/user-attachments/assets/0f9f89f8-0ff4-4bdb-8b77-bf805729b246" />
-
-### 3. 图片识别与理解
-
-在 `DingTalk` 里直接发图，`d-connect` 会下载媒体文件并把本地路径注入给 Agent，适合“看图说明”“读截图排障”等场景。
-
-<img width="603" height="1311" alt="图片识别" src="https://github.com/user-attachments/assets/6315f6ea-45c1-453b-9054-f775c6ad7833" />
-
-### 4. Guard 安全拦截
-
-支持按项目开启 Guard。命中敏感规则时，请求会在进入 Agent 之前被拦截。
-
-<img width="603" height="1311" alt="可配置 guard 拦截" src="https://github.com/user-attachments/assets/1d3bedb5-62cf-40c2-8624-17e5154b7a6c" />
 
 ## 配置示例
 
@@ -141,25 +138,6 @@ d-connect start
 - `DingTalk`
   - `clientId` / `clientSecret`：平台凭证
   - `processingNotice`：处理中提示；设为 `"none"` 可关闭
-- `Feishu`
-  - `appId` / `appSecret`：平台凭证
-  - `groupReplyAll`：群聊是否不经 @ 也处理消息
-  - `reactionEmoji`：收到消息后添加的 reaction；设为 `"none"` 可关闭
-
-切换到 `Feishu` 时，只需要把平台块改成下面这种形式：
-
-```json
-{
-  "type": "feishu",
-  "options": {
-    "appId": "cli_xxx",
-    "appSecret": "xxx",
-    "allowFrom": "*",
-    "groupReplyAll": false,
-    "reactionEmoji": "OnIt"
-  }
-}
-```
 
 > [!NOTE]
 > 当前所有 Agent 都默认以 `yolo` 方式运行，不再提供 `agent.options.mode` 配置项。
