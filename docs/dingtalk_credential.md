@@ -20,9 +20,9 @@
 
 完成后，你会进入该应用的开发控制台。
 
-![选择组织](./dingtalk-client-credentials-assets/select-organization.png)
+<img width="802" height="888" alt="image" src="https://github.com/user-attachments/assets/b3d59b3c-3344-4305-bfc0-5b811222cd56" />
 
-![创建应用入口](./dingtalk-client-credentials-assets/create-app-entry.png)
+<img width="2042" height="920" alt="image" src="https://github.com/user-attachments/assets/87ff32c9-0cd3-469d-9324-a4fbf59af9d1" />
 
 ## 2. 给应用添加机器人能力
 
@@ -37,9 +37,9 @@
 - 机器人消息预览图只是群里添加机器人时的展示素材。
 - 首次调试时可以先上传一张符合格式要求的占位图片，后续再调整。
 
-![添加机器人能力](./dingtalk-client-credentials-assets/add-bot-capability.png)
+<img width="3018" height="1236" alt="image" src="https://github.com/user-attachments/assets/eec63a95-2f78-4bd7-a9c2-f8b456ed16fb" />
 
-![机器人配置](./dingtalk-client-credentials-assets/bot-config.png)
+<img width="2778" height="1326" alt="image" src="https://github.com/user-attachments/assets/53181b4b-607e-46ba-99e7-5ee02844b7f0" />
 
 ## 3. 发布一个应用版本
 
@@ -54,9 +54,9 @@
 
 建议先确认应用对测试人员可见，否则即使机器人能力已配置，后续联调也可能找不到应用。
 
-![进入目标应用](./dingtalk-client-credentials-assets/app-list.png)
+<img width="2418" height="531" alt="image" src="https://github.com/user-attachments/assets/6bbc453e-b22a-440f-8c83-2f1664283c61" />
 
-![创建新版本](./dingtalk-client-credentials-assets/create-version.png)
+<img width="3018" height="1300" alt="image" src="https://github.com/user-attachments/assets/b70ce8a2-dcee-4c29-a78e-d4fc4d2f576b" />
 
 ## 4. 获取 `Client ID` 和 `Client Secret`
 
@@ -67,7 +67,7 @@
 
 这两个值就是 `d-connect` 钉钉平台配置里需要填写的凭证。
 
-![复制 Client ID 和 Client Secret](./dingtalk-client-credentials-assets/client-id-secret.png)
+<img width="2376" height="1238" alt="image" src="https://github.com/user-attachments/assets/4ea318e1-ccd6-4a73-800f-75b5ecdd2661" />
 
 ## 5. 回填到 `d-connect` 配置
 
