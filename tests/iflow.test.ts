@@ -1,5 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 import {
+  IFlowAdapter,
   createIFlowAdapter,
   recordAssistantTools,
   recordToolResults,
@@ -162,5 +163,43 @@ describe("iflow pending tool tracking", () => {
       { type: "text", text: "我来帮你搜一下。" },
       { type: "tool_use", tool: { id: "web_search:0", name: "web_search", input: { query: "hello" } } },
     ]);
+  });
+
+  test("tool timeouts are logged without appending timeout text to the reply", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-08T10:04:44.000Z"));
+
+    const logger = new Logger("error");
+    const warnSpy = vi.spyOn(logger, "warn");
+    const adapter = new IFlowAdapter(
+      {
+        workDir: "/Users/felixwang/Desktop/d-connect",
+        mode: "yolo",
+      },
+      logger,
+    );
+
+    const session = (await adapter.startSession("session-timeout")) as any;
+    const turn = {
+      resultChunks: ["我来帮你创建这个定时任务。"],
+      pendingTools: new Map([["run_shell_command:0", "run_shell_command"]]),
+      pendingStartedAt: Date.now() - 46000,
+      pendingTimeoutMs: 45000,
+      lastTextAt: 0,
+    };
+
+    expect(session.shouldFinishByToolTimeout(turn)).toBe(true);
+    expect(turn.resultChunks).toEqual(["我来帮你创建这个定时任务。"]);
+    expect(turn.pendingTools.size).toBe(0);
+    expect(turn.pendingStartedAt).toBe(0);
+    expect(warnSpy).toHaveBeenCalledWith("iflow tool execution timed out", {
+      sessionId: "session-timeout",
+      pendingTools: ["run_shell_command"],
+      timeoutMs: 45000,
+      mode: "yolo",
+    });
+
+    await adapter.stop();
+    vi.useRealTimers();
   });
 });

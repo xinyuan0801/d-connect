@@ -441,12 +441,12 @@ class IFlowSession extends EventEmitter implements AgentSession {
     }
 
     const names = [...new Set(turn.pendingTools.values())].filter(Boolean);
-    const hint = names.length > 0 ? `pending tools: ${names.join(", ")}` : "tool calls timed out";
-    const advice =
-      this.adapter.getMode() === "default"
-        ? " default mode requires interactive approval; switch to yolo or auto-edit for tool calls."
-        : "";
-    turn.resultChunks.push(`tool execution timeout (${hint}).${advice}`);
+    this.adapter.logger.warn("iflow tool execution timed out", {
+      sessionId: this.currentSessionId(),
+      pendingTools: names,
+      timeoutMs: turn.pendingTimeoutMs,
+      mode: this.adapter.getMode(),
+    });
     turn.pendingTools.clear();
     turn.pendingStartedAt = 0;
     turn.lastTextAt = Date.now();
