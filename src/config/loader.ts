@@ -45,7 +45,6 @@ export async function bootstrapConfig(path: string): Promise<void> {
 function defaultConfigTemplate(): AppConfig {
   return {
     configVersion: 1,
-    dataDir: join(homedir(), ".d-connect"),
     log: { level: "info" },
     cron: { silent: false },
     projects: [
@@ -83,6 +82,15 @@ export async function loadConfig(path: string): Promise<AppConfig> {
     parsed = JSON.parse(raw);
   } catch (error) {
     throw new Error(`config parse error: ${(error as Error).message}`);
+  }
+
+  if (
+    parsed &&
+    typeof parsed === "object" &&
+    !Array.isArray(parsed) &&
+    Object.prototype.hasOwnProperty.call(parsed, "dataDir")
+  ) {
+    throw new Error("config validation error: \"dataDir\" is no longer supported; runtime data is stored in .d-connect automatically");
   }
 
   const config = configSchema.parse(parsed);

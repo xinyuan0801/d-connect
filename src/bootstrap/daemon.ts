@@ -22,7 +22,7 @@ export async function resolveAndLoadConfig(explicitConfigPath?: string) {
   }
 
   const rawConfig = await loadConfig(configPath);
-  const config = normalizeConfig(rawConfig);
+  const config = normalizeConfig(rawConfig, { configPath });
   return {
     config,
     rawConfig,

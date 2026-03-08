@@ -1,6 +1,5 @@
 import { writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname } from "node:path";
 import { stdin as processStdin, stdout as processStdout } from "node:process";
 import { fileExists, resolveConfigPath } from "./loader.js";
 import type { AppConfig } from "./schema.js";
@@ -13,7 +12,6 @@ type LogLevel = "debug" | "info" | "warn" | "error";
 
 export interface InitAnswers {
   projectName: string;
-  dataDir: string;
   logLevel: LogLevel;
   cronSilent: boolean;
   agentType: AgentType;
@@ -71,13 +69,11 @@ export function inferProjectNameFromWorkDir(workDir: string, fallback = "my-back
   return normalized;
 }
 
-export function defaultInitAnswers(opts: { cwd?: string; homeDir?: string } = {}): InitAnswers {
+export function defaultInitAnswers(opts: { cwd?: string } = {}): InitAnswers {
   const cwd = opts.cwd ?? process.cwd();
-  const homeDir = opts.homeDir ?? homedir();
 
   return {
     projectName: inferProjectNameFromWorkDir(cwd),
-    dataDir: join(homeDir, ".d-connect"),
     logLevel: "info",
     cronSilent: false,
     agentType: "claudecode",
@@ -101,7 +97,6 @@ export function buildConfigFromAnswers(answers: InitAnswers): AppConfig {
   const normalized: InitAnswers = {
     ...answers,
     projectName: toNonEmpty(answers.projectName, "projectName"),
-    dataDir: toNonEmpty(answers.dataDir, "dataDir"),
     agentCmd: toNonEmpty(answers.agentCmd, "agentCmd"),
     agentWorkDir: toNonEmpty(answers.agentWorkDir, "agentWorkDir"),
     allowFrom: toNonEmpty(answers.allowFrom, "allowFrom"),
@@ -151,7 +146,6 @@ export function buildConfigFromAnswers(answers: InitAnswers): AppConfig {
 
   return {
     configVersion: 1,
-    dataDir: normalized.dataDir,
     log: {
       level: normalized.logLevel,
     },
@@ -184,7 +178,6 @@ export async function initConfig(options: InitConfigOptions = {}): Promise<InitC
 
   const defaults = defaultInitAnswers({
     cwd: options.cwd,
-    homeDir: options.homeDir,
   });
 
   const answers = options.yes

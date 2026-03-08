@@ -79,7 +79,6 @@ const projectSchema = z.object({
 
 export const configSchema = z.object({
   configVersion: z.number().int().positive().default(1),
-  dataDir: z.string().optional(),
   log: logSchema,
   cron: cronSchema,
   projects: z.array(projectSchema).min(1),

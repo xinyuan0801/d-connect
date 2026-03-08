@@ -1,5 +1,3 @@
-import { join } from "node:path";
-import { homedir } from "node:os";
 import { type AppConfig } from "./schema.js";
 
 export function validateConfigBusinessRules(config: AppConfig): AppConfig {
@@ -11,9 +9,5 @@ export function validateConfigBusinessRules(config: AppConfig): AppConfig {
     projectNames.add(project.name);
   }
 
-  return {
-    ...config,
-    dataDir: config.dataDir ?? join(homedir(), ".d-connect"),
-  };
+  return config;
 }
-

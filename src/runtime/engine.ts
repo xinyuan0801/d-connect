@@ -8,7 +8,7 @@ import { DaemonRuntime, type RuntimeSendInput, type RuntimeSendResult } from "..
 export { formatResponseFromEvents, splitResponseMessages, summarizeToolMessages } from "../services/message-relay.js";
 
 function isResolvedConfig(config: AppConfig | ResolvedAppConfig): config is ResolvedAppConfig {
-  return typeof config.dataDir === "string";
+  return typeof (config as Partial<ResolvedAppConfig>).dataDir === "string";
 }
 
 export class RuntimeEngine {

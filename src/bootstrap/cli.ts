@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { Command } from "commander";
-import { initConfig } from "../config/index.js";
+import { addProjectConfig, initConfig } from "../config/index.js";
 import { ipcCronAdd, ipcCronDel, ipcCronList, ipcSend } from "../ipc/client.js";
 import { resolveAndLoadConfig, startDaemon } from "./daemon.js";
 
@@ -43,6 +43,19 @@ export function createCliProgram(): Command {
       });
       const operation = result.overwritten ? "updated" : "created";
       console.log(`config ${operation} at ${result.configPath}`);
+    });
+
+  program
+    .command("add")
+    .description("Add one project to existing config.json")
+    .option("-c, --config <path>", "Path to config.json")
+    .option("-y, --yes", "Use defaults and skip interactive prompts")
+    .action(async (opts: { config?: string; yes?: boolean }) => {
+      const result = await addProjectConfig({
+        explicitConfigPath: opts.config,
+        yes: Boolean(opts.yes),
+      });
+      console.log(`project ${result.projectName} added to ${result.configPath}`);
     });
 
   program

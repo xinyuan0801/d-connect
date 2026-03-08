@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { buildConfigFromAnswers, defaultInitAnswers, inferProjectNameFromWorkDir, initConfig } from "../src/config/init.js";
-import { loadConfig } from "../src/config/index.js";
+import { loadConfig, normalizeConfig } from "../src/config/index.js";
 
 describe("init config", () => {
   test("buildConfigFromAnswers builds dingtalk project config", () => {
@@ -23,6 +23,7 @@ describe("init config", () => {
     };
 
     const config = buildConfigFromAnswers(answers);
+    expect(config).not.toHaveProperty("dataDir");
     expect(config.projects[0]?.agent.type).toBe("claudecode");
     expect(config.projects[0]?.agent.options).toMatchObject({
       workDir: "/tmp/repo",
@@ -59,6 +60,7 @@ describe("init config", () => {
     };
 
     const config = buildConfigFromAnswers(answers);
+    expect(config).not.toHaveProperty("dataDir");
     expect(config.projects[0]?.agent.type).toBe("qoder");
     expect(config.projects[0]?.agent.options).toEqual({
       workDir: "/tmp/repo2",
@@ -99,8 +101,12 @@ describe("init config", () => {
     expect(result.overwritten).toBe(false);
     expect(result.configPath).toBe(configPath);
 
+    const rawFile = await readFile(configPath, "utf8");
+    expect(rawFile).not.toContain("\"dataDir\"");
+
     const parsed = await loadConfig(configPath);
-    expect(parsed.dataDir).toBe(join(homeDir, ".d-connect"));
+    const resolved = normalizeConfig(parsed, { configPath });
+    expect(resolved.dataDir).toBe(join(root, ".d-connect"));
     expect(parsed.projects[0]?.name).toBe("workspace");
     expect(parsed.projects[0]?.agent.options).toMatchObject({
       workDir: cwd,

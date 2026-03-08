@@ -4,11 +4,10 @@ import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { loadConfig, normalizeConfig, resolveConfigPath } from "../src/config/index.js";
 
-function validConfigJson(dataDir: string): string {
+function validConfigJson(): string {
   return JSON.stringify(
     {
       configVersion: 1,
-      dataDir,
       log: { level: "info" },
       cron: { silent: false },
       projects: [
@@ -69,7 +68,7 @@ describe("config loader", () => {
   test("loadConfig parses valid json and defaults", async () => {
     const root = await mkdtemp(join(tmpdir(), "d-connect-config-"));
     const path = join(root, "config.json");
-    await writeFile(path, validConfigJson(join(root, "data")), "utf8");
+    await writeFile(path, validConfigJson(), "utf8");
 
     const cfg = await loadConfig(path);
     expect(cfg.configVersion).toBe(1);
@@ -83,7 +82,7 @@ describe("config loader", () => {
   test("loadConfig supports feishu platform", async () => {
     const root = await mkdtemp(join(tmpdir(), "d-connect-config-"));
     const path = join(root, "config.json");
-    const payload = JSON.parse(validConfigJson(join(root, "data")));
+    const payload = JSON.parse(validConfigJson());
     payload.projects[0].platforms = [
       {
         type: "feishu",
@@ -107,17 +106,27 @@ describe("config loader", () => {
   test("loadConfig rejects invalid agent type", async () => {
     const root = await mkdtemp(join(tmpdir(), "d-connect-config-"));
     const path = join(root, "config.json");
-    const payload = JSON.parse(validConfigJson(join(root, "data")));
+    const payload = JSON.parse(validConfigJson());
     payload.projects[0].agent.type = "unknown";
     await writeFile(path, `${JSON.stringify(payload)}\n`, "utf8");
 
     await expect(loadConfig(path)).rejects.toThrow();
   });
 
+  test("loadConfig rejects deprecated dataDir field", async () => {
+    const root = await mkdtemp(join(tmpdir(), "d-connect-config-"));
+    const path = join(root, "config.json");
+    const payload = JSON.parse(validConfigJson());
+    payload.dataDir = "/tmp/legacy-d-connect";
+    await writeFile(path, `${JSON.stringify(payload)}\n`, "utf8");
+
+    await expect(loadConfig(path)).rejects.toThrow(/dataDir.*no longer supported/i);
+  });
+
   test("loadConfig rejects duplicate project names", async () => {
     const root = await mkdtemp(join(tmpdir(), "d-connect-config-"));
     const path = join(root, "config.json");
-    const payload = JSON.parse(validConfigJson(join(root, "data")));
+    const payload = JSON.parse(validConfigJson());
     payload.projects.push(payload.projects[0]);
     await writeFile(path, `${JSON.stringify(payload)}\n`, "utf8");
 
@@ -127,7 +136,7 @@ describe("config loader", () => {
   test("normalizeConfig keeps typed agent fields and passthrough extras", async () => {
     const root = await mkdtemp(join(tmpdir(), "d-connect-config-"));
     const path = join(root, "config.json");
-    const payload = JSON.parse(validConfigJson(join(root, "data")));
+    const payload = JSON.parse(validConfigJson());
     payload.projects[0].agent.options = {
       cmd: "claude",
       workDir: "/repo",
@@ -137,13 +146,26 @@ describe("config loader", () => {
     await writeFile(path, `${JSON.stringify(payload)}\n`, "utf8");
 
     const cfg = await loadConfig(path);
-    const resolved = normalizeConfig(cfg);
+    const resolved = normalizeConfig(cfg, { configPath: path });
 
     expect(resolved.projects[0]?.agent.options).toMatchObject({
       cmd: "claude",
       workDir: "/repo",
       allowedTools: ["Read", "Write"],
     });
-    expect(typeof resolved.dataDir).toBe("string");
+    expect(resolved.dataDir).toBe(join(root, ".d-connect"));
+  });
+
+  test("normalizeConfig reuses config directory when config.json is already inside .d-connect", async () => {
+    const root = await mkdtemp(join(tmpdir(), "d-connect-config-"));
+    const configDir = join(root, ".d-connect");
+    const path = join(configDir, "config.json");
+    await mkdir(configDir, { recursive: true });
+    await writeFile(path, validConfigJson(), "utf8");
+
+    const cfg = await loadConfig(path);
+    const resolved = normalizeConfig(cfg, { configPath: path });
+
+    expect(resolved.dataDir).toBe(configDir);
   });
 });

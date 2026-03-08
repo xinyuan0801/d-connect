@@ -17,6 +17,7 @@
 - 源码只改 `src/**` 和 `tests/**`，不要手改 `dist/**`。
 - 本项目导入路径遵循 ESM 约定，TypeScript 源文件内部也使用 `./foo.js` 这样的后缀。
 - 配置文件格式是严格 `JSON`，不是 JSONC。
+- 运行数据目录固定为 `.d-connect/`，不再支持 `dataDir` 配置项；规则是“普通配置文件 -> 配置文件同级 `.d-connect`，若配置文件本身位于 `.d-connect/config.json` -> 直接复用该目录”。
 
 ## 常用命令
 
@@ -25,8 +26,10 @@ pnpm install
 pnpm run build
 pnpm test
 pnpm run dev init -c ./config.json
+pnpm run dev add -c ./config.json
 pnpm run dev start -c ./config.json
 node dist/index.js init -c ./config.json
+node dist/index.js add -c ./config.json
 node dist/index.js start -c ./config.json
 ```
 
@@ -128,9 +131,9 @@ pnpm run build
 
 - 建议先执行 `init` 生成配置；若配置文件不存在，`start` 仍会自动生成模板并退出。
 - 本地调试优先使用 `local:<name>` 这样的 `sessionKey`，先验证 runtime/IPC/cron，再接入真实 IM。
-- 守护进程依赖 `dataDir/ipc.sock`；排查 IPC 问题时先确认 `start` 是否已成功启动。
+- 守护进程依赖 `.d-connect/ipc.sock`；排查 IPC 问题时先确认 `start` 是否已成功启动。
 - 若看到 `session is busy`，说明同一会话仍在处理上一条请求，不要把它误判为进程卡死。
-- `cron` 回投依赖某个 `sessionKey` 最近一次成功建立的 `DeliveryTarget`；该信息持久化在 `dataDir/sessions/sessions.json`。
+- `cron` 回投依赖某个 `sessionKey` 最近一次成功建立的 `DeliveryTarget`；该信息持久化在 `.d-connect/sessions/sessions.json`。
 - 若守护进程重启后 `cron` 不回投，先确认该 `sessionKey` 是否收到过真实平台消息，以及平台是否支持 `send()` 异步发送。
 
 ### DingTalk 排障经验
@@ -139,7 +142,7 @@ pnpm run build
 - DingTalk `CALLBACK` 需要显式回执。若收到消息后没有调用 `client.socketCallBackResponse(downstream.headers.messageId, "")`，平台通常会在约 60 秒后重投同一条消息，表现为“用户只发了一次，但被消费两次”。
 - DingTalk 去重窗口要明显长于平台重投窗口。当前实现按 `msgId` 去重，TTL 设为 10 分钟；若只配 60 秒，容易与 callback 重投时间撞上，导致同一消息再次穿透。
 - 排查“重复消费”时，优先同时看两个 ID：业务消息 ID `raw.msgId` 和 stream 层消息 ID `downstream.headers.messageId`。日志里最好同时打印 `conversationId`、`userId` 和内容预览，便于区分“平台重投同一消息”与“用户真的又发了一次”。
-- 排查“看起来串 session”时，不要只看钉钉聊天窗口。钉钉没有 thread 视图，多个逻辑 session 的回复会落在同一时间线里；应以 `dataDir/sessions/sessions.json` 中的 `activeSession`、各 session 独立 history、`agentSessionId` 为准，先判断是 UI 交错还是后端真的混写。
+- 排查“看起来串 session”时，不要只看钉钉聊天窗口。钉钉没有 thread 视图，多个逻辑 session 的回复会落在同一时间线里；应以 `.d-connect/sessions/sessions.json` 中的 `activeSession`、各 session 独立 history、`agentSessionId` 为准，先判断是 UI 交错还是后端真的混写。
 - DingTalk 的 `sessionWebhook` 是临时发送目标，必须结合 `sessionWebhookExpiredTime` 使用。异步回投或 cron 不生效时，先检查持久化的 `DeliveryTarget` 是否已过期；过期后只能靠新的真实 DingTalk 消息刷新。
 - 若日志显示 `dingtalk stream connected` 但没有任何入站处理，先核对三件事：是否订阅了 `TOPIC_ROBOT` callback、allow-list 是否放行当前用户、消息类型是否为当前支持的 `text`。
 

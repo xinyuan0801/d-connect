@@ -1,5 +1,4 @@
-import { join } from "node:path";
-import { homedir } from "node:os";
+import { basename, dirname, join } from "node:path";
 import type { BaseAgentOptions } from "../core/agent-options.js";
 import type { AppConfig, BaseAgentOptionsConfig, ProjectConfig } from "./schema.js";
 
@@ -26,9 +25,14 @@ export interface ResolvedProjectConfig extends Omit<ProjectConfig, "agent" | "pl
   platforms: ResolvedPlatformConfig[];
 }
 
-export interface ResolvedAppConfig extends Omit<AppConfig, "dataDir" | "projects"> {
+export interface ResolvedAppConfig extends Omit<AppConfig, "projects"> {
   dataDir: string;
   projects: ResolvedProjectConfig[];
+}
+
+export interface NormalizeConfigOptions {
+  configPath?: string;
+  cwd?: string;
 }
 
 function normalizeAgentOptions(options: BaseAgentOptionsConfig): ResolvedAgentOptions {
@@ -57,17 +61,25 @@ function normalizePlatformConfig(platform: ProjectConfig["platforms"][number]): 
   };
 }
 
-export function normalizeConfig(config: AppConfig): ResolvedAppConfig {
+export function resolveDataDir(configPath?: string, cwd = process.cwd()): string {
+  const baseDir = configPath ? dirname(configPath) : cwd;
+  if (basename(baseDir) === ".d-connect") {
+    return baseDir;
+  }
+  return join(baseDir, ".d-connect");
+}
+
+export function normalizeConfig(config: AppConfig, options: NormalizeConfigOptions = {}): ResolvedAppConfig {
   return {
     ...config,
-    dataDir: config.dataDir ?? join(homedir(), ".d-connect"),
+    dataDir: resolveDataDir(options.configPath, options.cwd),
     projects: config.projects.map((project) => ({
       ...project,
-        agent: {
-          type: project.agent.type,
-          options: normalizeAgentOptions(project.agent.options),
-        },
-        platforms: project.platforms.map(normalizePlatformConfig),
-      })),
+      agent: {
+        type: project.agent.type,
+        options: normalizeAgentOptions(project.agent.options),
+      },
+      platforms: project.platforms.map(normalizePlatformConfig),
+    })),
   };
 }
