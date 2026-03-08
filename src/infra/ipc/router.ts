@@ -1,11 +1,11 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { parse as parseUrl } from "node:url";
 import { Logger } from "../logging/logger.js";
-import { CronScheduler } from "../../scheduler/cron.js";
+import { LoopScheduler } from "../../scheduler/loop.js";
 import { RuntimeEngine } from "../../runtime/engine.js";
 import {
-  cronAddRequestSchema,
-  cronDelRequestSchema,
+  loopAddRequestSchema,
+  loopDelRequestSchema,
   sendRequestSchema,
   type IpcResult,
   type SendResponse,
@@ -13,7 +13,7 @@ import {
 
 interface IpcRouteContext {
   runtime: RuntimeEngine;
-  cron: CronScheduler;
+  loop: LoopScheduler;
   logger: Logger;
 }
 
@@ -71,13 +71,13 @@ export function createIpcRouter(context: IpcRouteContext) {
     },
     {
       method: "POST",
-      path: "/cron/add",
+      path: "/loop/add",
       async handle(request, routeContext) {
-        const body = cronAddRequestSchema.parse(await readJsonBody(request.req));
-        const job = await routeContext.cron.addJob({
+        const body = loopAddRequestSchema.parse(await readJsonBody(request.req));
+        const job = await routeContext.loop.addJob({
           project: body.project,
           sessionKey: body.sessionKey,
-          cronExpr: body.cronExpr,
+          scheduleExpr: body.scheduleExpr,
           prompt: body.prompt,
           description: body.description,
           silent: body.silent,
@@ -87,19 +87,19 @@ export function createIpcRouter(context: IpcRouteContext) {
     },
     {
       method: "GET",
-      path: "/cron/list",
+      path: "/loop/list",
       async handle(request, routeContext) {
         const project = typeof request.query.project === "string" ? request.query.project : undefined;
-        const jobs = routeContext.cron.list(project);
+        const jobs = routeContext.loop.list(project);
         writeJson(request.res, 200, { ok: true, data: { jobs } });
       },
     },
     {
       method: "POST",
-      path: "/cron/del",
+      path: "/loop/del",
       async handle(request, routeContext) {
-        const body = cronDelRequestSchema.parse(await readJsonBody(request.req));
-        const ok = await routeContext.cron.removeJob(body.id);
+        const body = loopDelRequestSchema.parse(await readJsonBody(request.req));
+        const ok = await routeContext.loop.removeJob(body.id);
         writeJson(request.res, 200, { ok: true, data: { deleted: ok, id: body.id } });
       },
     },

@@ -2,23 +2,23 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { createCronStore, CronScheduler } from "../src/scheduler/cron.js";
+import { createLoopStore, LoopScheduler } from "../src/scheduler/loop.js";
 import { Logger } from "../src/logging.js";
-import type { CronJob, JobExecutor } from "../src/runtime/types.js";
+import type { LoopJob, JobExecutor } from "../src/runtime/types.js";
 
 class MockExecutor implements JobExecutor {
-  public calls: CronJob[] = [];
+  public calls: LoopJob[] = [];
 
-  async executeJob(job: CronJob): Promise<void> {
+  async executeJob(job: LoopJob): Promise<void> {
     this.calls.push(job);
   }
 }
 
-describe("cron scheduler", () => {
+describe("loop scheduler", () => {
   test("add/list/del and run now", async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), "d-connect-cron-"));
-    const store = await createCronStore(dataDir);
-    const scheduler = new CronScheduler(store, new Logger("error"));
+    const dataDir = await mkdtemp(join(tmpdir(), "d-connect-loop-"));
+    const store = await createLoopStore(dataDir);
+    const scheduler = new LoopScheduler(store, new Logger("error"));
 
     const executor = new MockExecutor();
     scheduler.registerExecutor("demo", executor);
@@ -26,7 +26,7 @@ describe("cron scheduler", () => {
     const job = await scheduler.addJob({
       project: "demo",
       sessionKey: "s-user",
-      cronExpr: "*/10 * * * * *",
+      scheduleExpr: "*/10 * * * * *",
       prompt: "check status",
       description: "test",
       silent: false,

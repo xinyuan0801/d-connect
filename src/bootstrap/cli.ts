@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { Command } from "commander";
 import { addProjectConfig, initConfig } from "../config/index.js";
-import { ipcCronAdd, ipcCronDel, ipcCronList, ipcSend } from "../ipc/client.js";
+import { ipcLoopAdd, ipcLoopDel, ipcLoopList, ipcSend } from "../ipc/client.js";
 import { resolveAndLoadConfig, startDaemon } from "./daemon.js";
 
 async function resolveSocketPath(configPath?: string): Promise<string> {
@@ -76,14 +76,14 @@ export function createCliProgram(): Command {
       console.log(result.response);
     });
 
-  const cron = program.command("cron").description("Manage cron jobs in daemon");
+  const loop = program.command("loop").description("Manage loop jobs in daemon");
 
-  cron
+  loop
     .command("add")
-    .description("Add cron job")
+    .description("Add loop job")
     .requiredOption("-p, --project <name>", "Project name")
     .requiredOption("-s, --session-key <key>", "Session key")
-    .requiredOption("-e, --expr <cronExpr>", "Cron expression")
+    .requiredOption("-e, --expr <scheduleExpr>", "Schedule expression")
     .option("-d, --description <text>", "Description", "")
     .option("--silent", "Do not push result back to platform")
     .option("-c, --config <path>", "Path to config.json")
@@ -95,10 +95,10 @@ export function createCliProgram(): Command {
       ) => {
         const socketPath = await resolveSocketPath(opts.config);
         const prompt = promptArgs.join(" ").trim();
-        const job = await ipcCronAdd(socketPath, {
+        const job = await ipcLoopAdd(socketPath, {
           project: opts.project,
           sessionKey: opts.sessionKey,
-          cronExpr: opts.expr,
+          scheduleExpr: opts.expr,
           prompt,
           description: opts.description,
           silent: Boolean(opts.silent),
@@ -107,29 +107,29 @@ export function createCliProgram(): Command {
       },
     );
 
-  cron
+  loop
     .command("list")
-    .description("List cron jobs")
+    .description("List loop jobs")
     .option("-p, --project <name>", "Project name")
     .option("-c, --config <path>", "Path to config.json")
     .action(async (opts: { project?: string; config?: string }) => {
       const socketPath = await resolveSocketPath(opts.config);
-      const result = await ipcCronList(socketPath, opts.project);
+      const result = await ipcLoopList(socketPath, opts.project);
       for (const job of result.jobs) {
-        console.log(`${job.id}\t${job.project}\t${job.sessionKey}\t${job.cronExpr}\t${job.prompt}`);
+        console.log(`${job.id}\t${job.project}\t${job.sessionKey}\t${job.scheduleExpr}\t${job.prompt}`);
       }
     });
 
-  cron
+  loop
     .command("del")
-    .description("Delete cron job")
-    .requiredOption("-i, --id <id>", "Cron job id")
+    .description("Delete loop job")
+    .requiredOption("-i, --id <id>", "Loop job id")
     .option("-c, --config <path>", "Path to config.json")
     .action(async (opts: { id: string; config?: string }) => {
       const socketPath = await resolveSocketPath(opts.config);
-      const result = await ipcCronDel(socketPath, opts.id);
+      const result = await ipcLoopDel(socketPath, opts.id);
       if (!result.deleted) {
-        throw new Error(`cron job not found: ${opts.id}`);
+        throw new Error(`loop job not found: ${opts.id}`);
       }
       console.log(result.id);
     });

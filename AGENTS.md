@@ -2,7 +2,7 @@
 
 ## 项目定位
 
-`d-connect` 是一个本地守护进程，用于把本机 Agent CLI（`claudecode`、`codex`、`qoder`、`opencode`、`iflow`）桥接到 IM 平台（当前支持 `DingTalk`、`Feishu`），并通过本地 IPC 和 cron 能力管理会话与定时任务。
+`d-connect` 是一个本地守护进程，用于把本机 Agent CLI（`claudecode`、`codex`、`qoder`、`opencode`、`iflow`）桥接到 IM 平台（当前支持 `DingTalk`、`Feishu`），并通过本地 IPC 和 loop 能力管理会话与定时任务。
 
 ## 技术栈与运行约束
 
@@ -37,8 +37,8 @@ node dist/index.js start -c ./config.json
 
 ```bash
 pnpm run dev send -p <project> -s local:debug "hello"
-pnpm run dev cron add -p <project> -s local:debug -e "*/30 * * * * *" "status"
-pnpm run dev cron list -p <project>
+pnpm run dev loop add -p <project> -s local:debug -e "*/30 * * * * *" "status"
+pnpm run dev loop list -p <project>
 ```
 
 ## 目录结构
@@ -50,7 +50,7 @@ pnpm run dev cron list -p <project>
 - `src/adapters/agent/**`：各类 Agent CLI 适配器、共享 `BaseCliSession`、输出解析。
 - `src/adapters/platform/**`：IM 平台适配器，以及平台共享的 allow-list / delivery-target 能力。
 - `src/ipc/**`：对外 IPC server/client；路由表位于 `src/infra/ipc/router.ts`。
-- `src/scheduler/cron.ts`：定时任务调度与持久化编排，依赖 `JobExecutor` 接口。
+- `src/scheduler/loop.ts`：定时任务调度与持久化编排，依赖 `JobExecutor` 接口。
 - `src/infra/**`：logging、JSON 文件原子写入、IPC router 等基础设施。
 - `tests/**`：Vitest 测试，整体以模块级单测为主。
 - `dist/**`：构建产物，不作为人工修改入口。
@@ -59,7 +59,7 @@ pnpm run dev cron list -p <project>
 
 1. `src/index.ts` -> `src/bootstrap/cli.ts`
 2. `start` -> `src/bootstrap/daemon.ts`
-3. `daemon` 装配 `RuntimeEngine`、`CronScheduler`、`IpcServer`
+3. `daemon` 装配 `RuntimeEngine`、`LoopScheduler`、`IpcServer`
 4. `RuntimeEngine` 内部委托 `DaemonRuntime`
 5. `DaemonRuntime` -> `ProjectRegistry` / `ConversationService` / `CommandService` / `MessageRelay`
 6. 平台入站消息统一转换成 `InboundMessage`
@@ -130,11 +130,11 @@ pnpm run build
 ## 调试提示
 
 - 建议先执行 `init` 生成配置；若配置文件不存在，`start` 仍会自动生成模板并退出。
-- 本地调试优先使用 `local:<name>` 这样的 `sessionKey`，先验证 runtime/IPC/cron，再接入真实 IM。
+- 本地调试优先使用 `local:<name>` 这样的 `sessionKey`，先验证 runtime/IPC/loop，再接入真实 IM。
 - 守护进程依赖 `.d-connect/ipc.sock`；排查 IPC 问题时先确认 `start` 是否已成功启动。
 - 若看到 `session is busy`，说明同一会话仍在处理上一条请求，不要把它误判为进程卡死。
-- `cron` 回投依赖某个 `sessionKey` 最近一次成功建立的 `DeliveryTarget`；该信息持久化在 `.d-connect/sessions/sessions.json`。
-- 若守护进程重启后 `cron` 不回投，先确认该 `sessionKey` 是否收到过真实平台消息，以及平台是否支持 `send()` 异步发送。
+- `loop` 回投依赖某个 `sessionKey` 最近一次成功建立的 `DeliveryTarget`；该信息持久化在 `.d-connect/sessions/sessions.json`。
+- 若守护进程重启后 `loop` 不回投，先确认该 `sessionKey` 是否收到过真实平台消息，以及平台是否支持 `send()` 异步发送。
 
 ### DingTalk 排障经验
 
@@ -143,7 +143,7 @@ pnpm run build
 - DingTalk 去重窗口要明显长于平台重投窗口。当前实现按 `msgId` 去重，TTL 设为 10 分钟；若只配 60 秒，容易与 callback 重投时间撞上，导致同一消息再次穿透。
 - 排查“重复消费”时，优先同时看两个 ID：业务消息 ID `raw.msgId` 和 stream 层消息 ID `downstream.headers.messageId`。日志里最好同时打印 `conversationId`、`userId` 和内容预览，便于区分“平台重投同一消息”与“用户真的又发了一次”。
 - 排查“看起来串 session”时，不要只看钉钉聊天窗口。钉钉没有 thread 视图，多个逻辑 session 的回复会落在同一时间线里；应以 `.d-connect/sessions/sessions.json` 中的 `activeSession`、各 session 独立 history、`agentSessionId` 为准，先判断是 UI 交错还是后端真的混写。
-- DingTalk 的 `sessionWebhook` 是临时发送目标，必须结合 `sessionWebhookExpiredTime` 使用。异步回投或 cron 不生效时，先检查持久化的 `DeliveryTarget` 是否已过期；过期后只能靠新的真实 DingTalk 消息刷新。
+- DingTalk 的 `sessionWebhook` 是临时发送目标，必须结合 `sessionWebhookExpiredTime` 使用。异步回投或 loop 不生效时，先检查持久化的 `DeliveryTarget` 是否已过期；过期后只能靠新的真实 DingTalk 消息刷新。
 - 若日志显示 `dingtalk stream connected` 但没有任何入站处理，先核对三件事：是否订阅了 `TOPIC_ROBOT` callback、allow-list 是否放行当前用户、消息类型是否为当前支持的 `text`。
 
 ## 对后续 Agent 的要求

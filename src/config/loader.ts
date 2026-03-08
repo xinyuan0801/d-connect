@@ -46,7 +46,7 @@ function defaultConfigTemplate(): AppConfig {
   return {
     configVersion: 1,
     log: { level: "info" },
-    cron: { silent: false },
+    loop: { silent: false },
     projects: [
       {
         name: "my-backend",
@@ -91,6 +91,15 @@ export async function loadConfig(path: string): Promise<AppConfig> {
     Object.prototype.hasOwnProperty.call(parsed, "dataDir")
   ) {
     throw new Error("config validation error: \"dataDir\" is no longer supported; runtime data is stored in .d-connect automatically");
+  }
+
+  if (
+    parsed &&
+    typeof parsed === "object" &&
+    !Array.isArray(parsed) &&
+    Object.prototype.hasOwnProperty.call(parsed, "cron")
+  ) {
+    throw new Error("config validation error: \"cron\" has been renamed to \"loop\"");
   }
 
   const config = configSchema.parse(parsed);

@@ -15,7 +15,7 @@ describe("add config", () => {
         {
           configVersion: 1,
           log: { level: "warn" },
-          cron: { silent: true },
+          loop: { silent: true },
           projects: [
             {
               name: "repo",
@@ -91,7 +91,7 @@ describe("add config", () => {
         {
           configVersion: 1,
           log: { level: "info" },
-          cron: { silent: false },
+          loop: { silent: false },
           projects: [
             {
               name: "chat-bot",

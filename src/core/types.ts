@@ -91,11 +91,11 @@ export interface HistoryEntry {
   timestamp: string;
 }
 
-export interface CronJob {
+export interface LoopJob {
   id: string;
   project: string;
   sessionKey: string;
-  cronExpr: string;
+  scheduleExpr: string;
   prompt: string;
   description: string;
   enabled: boolean;
@@ -106,11 +106,11 @@ export interface CronJob {
 }
 
 export interface JobExecutor {
-  executeJob(job: CronJob): Promise<void>;
+  executeJob(job: LoopJob): Promise<void>;
 }
 
-export interface CronExecutor {
-  executeCronJob(job: CronJob): Promise<void>;
+export interface LoopExecutor {
+  executeLoopJob(job: LoopJob): Promise<void>;
 }
 
 export interface TurnResult {

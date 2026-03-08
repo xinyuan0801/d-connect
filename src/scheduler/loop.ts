@@ -3,22 +3,22 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import cron from "node-cron";
 import { writeJsonAtomic, ensureDir } from "../infra/store-json/atomic.js";
-import type { CronJob, JobExecutor } from "../core/types.js";
+import type { LoopJob, JobExecutor } from "../core/types.js";
 import { Logger } from "../logging.js";
 
-interface CronSnapshot {
-  jobs: CronJob[];
+interface LoopSnapshot {
+  jobs: LoopJob[];
 }
 
-export class CronStore {
-  private jobs = new Map<string, CronJob>();
+export class LoopStore {
+  private jobs = new Map<string, LoopJob>();
 
   constructor(private readonly path: string) {}
 
   async load(): Promise<void> {
     try {
       const raw = await readFile(this.path, "utf8");
-      const parsed = JSON.parse(raw) as CronSnapshot;
+      const parsed = JSON.parse(raw) as LoopSnapshot;
       this.jobs.clear();
       for (const job of parsed.jobs ?? []) {
         this.jobs.set(job.id, job);
@@ -34,19 +34,19 @@ export class CronStore {
     });
   }
 
-  list(): CronJob[] {
+  list(): LoopJob[] {
     return [...this.jobs.values()].sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
   }
 
-  listByProject(project: string): CronJob[] {
+  listByProject(project: string): LoopJob[] {
     return this.list().filter((job) => job.project === project);
   }
 
-  get(id: string): CronJob | undefined {
+  get(id: string): LoopJob | undefined {
     return this.jobs.get(id);
   }
 
-  async add(job: CronJob): Promise<void> {
+  async add(job: LoopJob): Promise<void> {
     this.jobs.set(job.id, job);
     await this.save();
   }
@@ -71,12 +71,12 @@ export class CronStore {
   }
 }
 
-export class CronScheduler {
+export class LoopScheduler {
   private readonly tasks = new Map<string, cron.ScheduledTask>();
   private readonly executors = new Map<string, JobExecutor>();
 
   constructor(
-    private readonly store: CronStore,
+    private readonly store: LoopStore,
     private readonly logger: Logger,
     private readonly defaultSilent = false,
   ) {}
@@ -90,7 +90,7 @@ export class CronScheduler {
     for (const job of jobs) {
       this.schedule(job);
     }
-    this.logger.info("cron scheduler started", { jobs: jobs.length });
+    this.logger.info("loop scheduler started", { jobs: jobs.length });
   }
 
   stop(): void {
@@ -101,26 +101,26 @@ export class CronScheduler {
     this.tasks.clear();
   }
 
-  private schedule(job: CronJob): void {
+  private schedule(job: LoopJob): void {
     const old = this.tasks.get(job.id);
     if (old) {
       old.stop();
       old.destroy();
     }
 
-    const task = cron.schedule(job.cronExpr, () => {
+    const task = cron.schedule(job.scheduleExpr, () => {
       void this.execute(job.id);
     });
 
     this.tasks.set(job.id, task);
   }
 
-  async addJob(input: Omit<CronJob, "id" | "createdAt" | "enabled">): Promise<CronJob> {
-    if (!cron.validate(input.cronExpr)) {
-      throw new Error(`invalid cron expression: ${input.cronExpr}`);
+  async addJob(input: Omit<LoopJob, "id" | "createdAt" | "enabled">): Promise<LoopJob> {
+    if (!cron.validate(input.scheduleExpr)) {
+      throw new Error(`invalid schedule expression: ${input.scheduleExpr}`);
     }
 
-    const job: CronJob = {
+    const job: LoopJob = {
       ...input,
       id: randomBytes(4).toString("hex"),
       enabled: true,
@@ -142,7 +142,7 @@ export class CronScheduler {
     return this.store.remove(id);
   }
 
-  list(project?: string): CronJob[] {
+  list(project?: string): LoopJob[] {
     if (!project) {
       return this.store.list();
     }
@@ -175,7 +175,7 @@ export class CronScheduler {
       await this.store.markRun(id);
     } catch (error) {
       await this.store.markRun(id, error as Error);
-      this.logger.error("cron job failed", {
+      this.logger.error("loop job failed", {
         id,
         error: (error as Error).message,
       });
@@ -183,10 +183,10 @@ export class CronScheduler {
   }
 }
 
-export async function createCronStore(dataDir: string): Promise<CronStore> {
-  const dir = join(dataDir, "crons");
+export async function createLoopStore(dataDir: string): Promise<LoopStore> {
+  const dir = join(dataDir, "loops");
   await ensureDir(dir);
-  const store = new CronStore(join(dir, "jobs.json"));
+  const store = new LoopStore(join(dir, "jobs.json"));
   await store.load();
   return store;
 }
