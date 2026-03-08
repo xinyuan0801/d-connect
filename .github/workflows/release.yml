@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.17.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@xinyuan0801"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify tag matches package version
+        run: |
+          VERSION=$(node -p "JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).version")
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+
+          if [ "$VERSION" != "$TAG_VERSION" ]; then
+            echo "Tag version $TAG_VERSION does not match package.json version $VERSION" >&2
+            exit 1
+          fi
+
+      - name: Run tests
+        run: pnpm test
+
+      - name: Build package
+        run: pnpm run build
+
+      - name: Publish to GitHub Packages
+        run: |
+          node <<'EOF'
+          const fs = require("node:fs");
+          const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+          if (pkg.publishConfig && "access" in pkg.publishConfig) {
+            delete pkg.publishConfig.access;
+          }
+          fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
+          EOF
+          pnpm publish --ignore-scripts --no-git-checks --registry https://npm.pkg.github.com
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub Release
+        run: gh release create "$GITHUB_REF_NAME" --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

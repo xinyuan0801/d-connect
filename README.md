@@ -36,6 +36,34 @@ npm install -g @xinyuan0801/d-connect
 d-connect help
 ```
 
+## 发布
+
+### 发布到 npm
+
+```bash
+pnpm run publish
+```
+
+### 让 GitHub 页面显示 Releases 和 Packages
+
+仓库已经支持通过 Git tag 自动发布：
+
+```bash
+git tag v0.1.1
+git push origin v0.1.1
+```
+
+推送 `v*` 标签后，GitHub Actions 会自动：
+
+- 创建对应版本的 GitHub Release
+- 将同版本包发布到 GitHub Packages
+
+约束：
+
+- tag 名必须和 `package.json` 里的版本一致，例如 `v0.1.1`
+- 需要仓库启用 GitHub Actions
+- GitHub Packages 使用仓库内置的 `GITHUB_TOKEN` 发布，无需额外 npm token
+
 ## 快速开始
 
 ### 1. 生成配置

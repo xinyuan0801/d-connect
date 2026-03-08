@@ -4,7 +4,13 @@
 
 ## [Unreleased]
 
-- 暂无变更。
+### Added
+
+- 新增基于 `v*` Git tag 的 GitHub Actions 发布流程，可自动创建 GitHub Release 并发布到 GitHub Packages。
+
+### Changed
+
+- README 补充 GitHub Releases 与 GitHub Packages 的触发方式说明。
 
 ## [0.1.1] - 2026-03-08
 
