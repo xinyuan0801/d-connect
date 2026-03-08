@@ -1,71 +1,97 @@
 # d-connect
 
-本项目用于将本地 Agent CLI（Claude Code / Qoder CLI / iFlow CLI）桥接到 IM 平台。
+> Tribute: 本项目在整体思路和使用形态上受 [cc-connect](https://github.com/chenhg5/cc-connect) 启发，感谢原项目提供的方向参考。
 
-当前版本支持：
-- 平台：DingTalk、Feishu（飞书）
-- Agent：`claudecode`、`qoder`（`qodercli`）、`iflow`
-- 配置格式：`JSON`（不支持 JSONC 注释）
+`d-connect` 是一个本地守护进程，用于把本机 Agent CLI 桥接到 IM 平台，并通过本地 IPC 与 cron 管理会话、消息回投和定时任务。
 
-## 1. 环境要求
+当前代码实现支持：
 
-- Node.js >= 22
+- IM 平台：DingTalk、Feishu
+- Agent CLI：`claudecode`、`qoder`、`iflow`
+- 配置格式：严格 `JSON`，不支持 JSONC 注释
+- 运行时：Node.js `>=22`
+
+## 功能概览
+
+- 一个 daemon 管多个 project，每个 project 绑定一组 agent/platform 配置
+- 支持本地 IPC：`send`、`cron add/list/del`
+- 支持按 `sessionKey` 维护多会话，并持久化历史与 active session
+- 支持异步回投：平台入站消息携带的 `DeliveryTarget` 会落盘，供 cron/重启后继续使用
+- DingTalk 支持文本、富文本、图片、音频、视频、文件等入站处理
+- Feishu 支持 `text` / `post` 入站处理，并支持 reaction 占位反馈
+
+## 环境要求
+
+- Node.js `>=22`
 - macOS 或 Linux
-- 对应 Agent CLI 已安装并可在终端执行（或在配置中指定 `cmd`）
+- `pnpm`
+- 已安装对应 Agent CLI，或在配置里显式指定 `agent.options.cmd`
 
-## 2. 安装
+## 安装与构建
 
-当前仓库版本尚未发布到 npm registry，首次使用请从源码安装命令：
+仓库当前未发布到 npm，建议直接从源码安装：
 
 ```bash
 pnpm install
 pnpm run build
-npm link
+pnpm link --global
 d-connect help
 ```
 
-可选：
-- 开发模式运行（不先 build）：`pnpm run dev <args>`
-- 构建后运行：`node dist/index.js <args>`
-- 全局链接后可直接运行：`d-connect <args>`
-- 若你使用 `pnpm link --global`，首次可能需要先执行 `pnpm setup`
+常见运行方式：
 
-## 3. 配置文件
+- 开发模式：`pnpm run dev <args>`
+- 构建产物：`node dist/index.js <args>`
+- 全局命令：`d-connect <args>`
 
-配置文件优先级：
+如果 `pnpm link --global` 首次不可用，先执行一次 `pnpm setup`。
+
+## 快速开始
+
+### 1. 初始化配置
+
+配置文件查找优先级：
+
 1. `-c / --config` 指定路径
-2. `./config.json`
+2. 当前目录下的 `./config.json`
 3. `~/.d-connect/config.json`
 
-推荐先使用初始化向导生成配置（交互式）：
+推荐先运行：
 
 ```bash
 d-connect init -c ./config.json
 ```
 
-`init` 会进入终端 TUI 向导，支持 `↑/↓`（或 `j/k`）选择、`Enter` 确认，并在侧边实时展示当前配置摘要。
-项目名不再单独输入，会按 `agent.options.workDir` 的目录名自动推断（空格会转为 `-`）。
+`init` 会打开一个终端向导：
 
-开发模式：
+- 支持 `↑/↓` 或 `j/k` 切换
+- `Enter` 确认
+- `project.name` 会按 `agent.options.workDir` 的目录名自动推断
+- `--yes` 可直接按默认值生成
+- `--force` 可覆盖已有文件
+
+开发模式下：
 
 ```bash
 pnpm run dev init -c ./config.json
 ```
 
-可选参数：
-- `--force`：覆盖已存在的配置文件
-- `--yes`：跳过交互，直接按默认值生成
+如果你直接执行 `start` 且配置不存在，程序会先生成模板配置并退出。
 
-兼容行为：若直接执行 `start` 且配置不存在，仍会自动生成模板并退出。
+### 2. 编辑配置
 
-### 3.1 示例（DingTalk）
+示例一：DingTalk + Claude Code
 
 ```json
 {
   "configVersion": 1,
   "dataDir": "/Users/you/.d-connect",
-  "log": { "level": "info" },
-  "cron": { "silent": false },
+  "log": {
+    "level": "info"
+  },
+  "cron": {
+    "silent": false
+  },
   "projects": [
     {
       "name": "my-backend",
@@ -73,9 +99,9 @@ pnpm run dev init -c ./config.json
         "type": "claudecode",
         "options": {
           "workDir": "/path/to/repo",
+          "cmd": "claude",
           "mode": "default",
-          "model": "claude-sonnet-4-20250514",
-          "cmd": "claude"
+          "model": "claude-sonnet-4-20250514"
         }
       },
       "platforms": [
@@ -94,14 +120,18 @@ pnpm run dev init -c ./config.json
 }
 ```
 
-### 3.2 示例（Feishu）
+示例二：Feishu + Qoder CLI
 
 ```json
 {
   "configVersion": 1,
   "dataDir": "/Users/you/.d-connect",
-  "log": { "level": "info" },
-  "cron": { "silent": false },
+  "log": {
+    "level": "info"
+  },
+  "cron": {
+    "silent": false
+  },
   "projects": [
     {
       "name": "my-feishu-project",
@@ -129,143 +159,217 @@ pnpm run dev init -c ./config.json
 }
 ```
 
-## 4. 运行
+关键字段：
 
-启动守护进程：
+- `dataDir`：运行数据目录，保存 `ipc.sock`、sessions、cron、日志
+- `allowFrom`：`*` 表示允许全部用户，也可填写逗号分隔的用户 ID
+- `cron.silent`：默认 cron 是否只执行不回推到平台
+- `processingNotice`：DingTalk 处理中的轻量提示，设为 `"none"` 可关闭
+- `groupReplyAll`：Feishu 群聊里是否无需 @ 机器人也处理消息
+- `reactionEmoji`：Feishu 处理中表情，设为 `"none"` 可关闭
+
+### 3. 启动守护进程
+
+```bash
+pnpm run dev start -c ./config.json
+```
+
+或：
 
 ```bash
 node dist/index.js start -c ./config.json
 ```
 
-或开发模式：
+启动后会创建：
+
+- `dataDir/ipc.sock`
+- `dataDir/sessions/sessions.json`
+- `dataDir/crons/jobs.json`
+- `dataDir/logs/d-connect.log`
+
+### 4. 发送本地调试消息
 
 ```bash
-pnpm run dev start -c ./config.json
+pnpm run dev send -p my-backend -s local:debug "hello"
 ```
 
-## 4.1 当前架构分层
+`local:<name>` 适合先验证 runtime、IPC、session 和 cron，不依赖真实 IM 平台。
 
-当前代码按“组合入口 + 核心契约 + 应用服务 + 适配器 + 基础设施”组织：
-
-- `src/bootstrap/**`：CLI 注册、daemon 启动、信号处理
-- `src/core/**`：运行时契约与通用类型（`InboundMessage`、`DeliveryTarget`、`JobExecutor` 等）
-- `src/services/**`：会话编排、命令处理、消息分发、项目注册
-- `src/adapters/agent/**`：Agent provider 与共享 CLI session 骨架
-- `src/adapters/platform/**`：平台入站解析、出站发送、格式化与平台策略
-- `src/infra/**`：logging、IPC router、JSON store 等基础设施
-- `src/config/**`：schema、loader、normalizer、init
-
-## 5. CLI 与本地 IPC
-
-守护进程启动后会监听 Unix Socket：
-- `POST /send`
-- `POST /cron/add`
-- `GET /cron/list`
-- `POST /cron/del`
-
-CLI 对应命令：
+## CLI 命令
 
 ```bash
-# 交互式初始化配置
 d-connect init -c ./config.json
-
-# 主动发消息到某个项目会话
-d-connect send -p my-backend -s local:debug "hello"
-
-# cron 管理
-d-connect cron add -p my-backend -s local:debug -e "*/30 * * * * *" "status"
-d-connect cron list -p my-backend
+d-connect start -c ./config.json
+d-connect send -p <project> -s <sessionKey> "hello"
+d-connect cron add -p <project> -s <sessionKey> -e "*/30 * * * * *" "status"
+d-connect cron list -p <project>
 d-connect cron del -i <job-id>
 ```
 
-## 6. 本地调试方式
+说明：
 
-## 6.1 纯本地链路调试（不依赖 IM）
+- `send` 会把消息送到指定 `project + sessionKey`
+- `cron add` 支持 `-d/--description`
+- `cron add --silent` 可让该任务执行但不回推到平台
+- `cron list` 会输出 `id / project / sessionKey / expr / prompt`
 
-适合先验证 Agent/会话/Cron：
+## 会话内命令
 
-1. 启动守护进程
+当 IM 消息内容以 `/` 开头时，会走内置命令处理：
+
+```text
+/help
+/new [name]
+/list
+/switch <id|name>
+/mode [name]
+/cron list
+/cron add <expr> <prompt>
+/cron del <id>
+```
+
+典型用途：
+
+- `/new`：在同一个 `sessionKey` 下创建新的逻辑 session
+- `/list`：查看该 `sessionKey` 下所有 session，带 `*` 的是当前 active session
+- `/switch`：切换 active session
+- `/mode`：查看或切换 agent mode
+- `/cron ...`：直接在聊天窗口里增删查定时任务
+
+## 本地联调
+
+### 纯本地链路
+
+先启动 daemon：
 
 ```bash
 pnpm run dev start -c ./config.json
 ```
 
-2. 在另一个终端发送消息
+另一个终端发送消息：
 
 ```bash
 pnpm run dev send -p my-backend -s local:alice "请给我当前项目结构"
-```
-
-3. 查看多会话行为（更换 `-s`）
-
-```bash
 pnpm run dev send -p my-backend -s local:bob "你好"
 ```
 
-4. 验证 cron 回投
+验证 cron：
 
 ```bash
 pnpm run dev cron add -p my-backend -s local:alice -e "*/20 * * * * *" "输出一次状态"
 ```
 
-说明：
-- `cron` 的异步回投依赖某个 `sessionKey` 最近一次成功收到的平台消息；该发送目标会持久化到 `dataDir/sessions/sessions.json`
-- 守护进程重启后，只要平台支持异步发送且该 `sessionKey` 已建立过发送目标，`cron` 仍可继续回投
-- 纯 `local:<name>` 调试不会自动生成 IM 平台发送目标，因此更适合验证 runtime/IPC/cron 执行本身
+注意：
 
-## 6.2 DingTalk 联调
+- `local:<name>` 不会自动生成真实 IM 平台的发送目标
+- 纯本地链路更适合验证 runtime、IPC、会话切换和 cron 执行
 
-1. 在钉钉开放平台创建应用，开通机器人能力，选择 Stream 模式
-2. 获取 `clientId/clientSecret` 写入 `config.json`
-3. 启动：`pnpm run dev start -c ./config.json`
-4. 在钉钉里给机器人发文本，观察终端日志与机器人回复
+### DingTalk 联调
 
-说明：
-- 当前支持 DingTalk `text`、`richText`、`picture`、`audio`、`video`、`file`
-- 富文本会提取可读文本；语音消息若携带钉钉 `recognition`，则直接把识别文本传给后端 agent，不再下载音频本体；图片/视频/文件会尝试通过 `downloadCode` 下载到本机临时目录，再把 `media_path` / `media_mime_type` 以及对应的 typed key（如 `image_path`、`video_path`、`file_path`）注入给后端 agent
-- 引用文字会作为上下文前缀注入；引用图片会尝试直接下载；引用文件/视频/语音会优先按 `conversationId + msgId` 命中本地缓存，缓存失效后在群聊场景下再通过群文件 API 按时间窗口兜底下载
-- 媒体下载失败时不会丢消息，至少会保留媒体占位、`media_download_code` 和 typed `*_download_code`
-- 默认 `processingNotice="处理中..."` 时，若处理超过一个短延迟，会先发送一条轻量确认消息；设为 `"none"` 可关闭
-- 机器人回包会在检测到标题、列表、代码块等 markdown 结构时自动切换为 DingTalk `markdown` 消息，普通短文本仍走 `text`
-- DingTalk 的异步回投依赖消息里携带的 `sessionWebhook`；该 webhook 自带有效期，过期后 `cron`/重启后的异步回投会失败，直到收到新的真实钉钉消息刷新发送目标
+1. 在钉钉开放平台创建应用并开通机器人能力
+2. 使用 Stream 模式
+3. 把 `clientId/clientSecret` 写入配置
+4. 启动 daemon
+5. 在钉钉里给机器人发送文本消息
 
-## 6.3 Feishu 联调
+当前行为：
+
+- 使用 `registerCallbackListener(TOPIC_ROBOT, ...)` 接 DingTalk 机器人回调
+- 收到 callback 后会显式回执，避免平台约 60 秒后重投同一消息
+- 默认按 `msgId` 做 10 分钟去重
+- 支持 `text`、`richText`、`picture`、`audio`、`video`、`file`
+- 图片/视频/文件通常会下载到 `agent.options.workDir/.d-connect/dingtalk-media`
+- 长处理会先发送 `processingNotice`，普通结构化回复会自动切到 markdown 消息
+
+回投限制：
+
+- DingTalk 异步发送依赖入站消息携带的 `sessionWebhook`
+- `sessionWebhook` 有有效期，过期后 cron 或重启后的异步回投会失败
+- 只有新的真实钉钉消息到来后，持久化的发送目标才会刷新
+
+### Feishu 联调
 
 1. 在飞书开放平台创建企业自建应用并开通机器人能力
-2. 订阅事件：`im.message.receive_v1`
-3. 获取 `appId/appSecret` 写入 `config.json`
-4. 启动：`pnpm run dev start -c ./config.json`
-5. 在飞书私聊或群聊 @机器人 发送文本，观察回复
+2. 订阅事件 `im.message.receive_v1`
+3. 把 `appId/appSecret` 写入配置
+4. 启动 daemon
+5. 在私聊或群聊中给机器人发消息
 
-说明：
-- 默认 `groupReplyAll=false` 时，群聊通常需要 @机器人 才处理
-- 默认 `reactionEmoji="OnIt"` 时，处理消息期间会先给原消息加一个 reaction，完成后移除；设为 `"none"` 可关闭
-- v1 当前只处理文本消息
+当前行为：
 
-## 7. 数据目录
+- 支持入站 `text` 与 `post`
+- 群聊默认需要 @机器人；`groupReplyAll=true` 时可关闭这个限制
+- 处理中默认会给原消息加 `reactionEmoji`，完成后移除
+- 回复会按内容复杂度自动选择 `text`、`post` 或 `interactive`
 
-`dataDir` 下会持久化：
-- `sessions/sessions.json`：会话状态与最近一次可用的异步发送目标
-- `crons/jobs.json`：定时任务状态
+## 目录与架构
+
+主要目录：
+
+- `src/bootstrap/**`：CLI 入口、daemon 启动、信号处理
+- `src/core/**`：共享类型与运行时契约
+- `src/services/**`：会话编排、命令处理、消息 relay
+- `src/adapters/agent/**`：Agent CLI 适配层
+- `src/adapters/platform/**`：DingTalk / Feishu 适配层
+- `src/config/**`：配置 schema、loader、normalize、init 向导
+- `src/ipc/**`：本地 IPC server/client
+- `src/scheduler/**`：cron 调度与持久化
+- `src/infra/**`：日志、原子写文件、router 等基础设施
+
+关键调用链：
+
+1. `src/index.ts`
+2. `src/bootstrap/cli.ts`
+3. `start` -> `src/bootstrap/daemon.ts`
+4. `daemon` 装配 `RuntimeEngine`、`CronScheduler`、`IpcServer`
+5. `RuntimeEngine` 委托 `DaemonRuntime`
+6. `DaemonRuntime` 调用 `ProjectRegistry`、`ConversationService`、`CommandService`、`MessageRelay`
+
+## 数据目录
+
+`dataDir` 下常见文件：
+
 - `ipc.sock`：本地 IPC socket
+- `sessions/sessions.json`：会话状态、历史、active session、最近一次可用的 `DeliveryTarget`
+- `crons/jobs.json`：cron 任务持久化
+- `logs/d-connect.log`：文件日志
 
-## 8. 测试
+## 测试与构建
 
 ```bash
 pnpm test
 pnpm run build
 ```
 
-## 9. 常见问题
+如果你改了以下路径，建议不要跳过测试：
 
-1. `agent cli not found`
-- 确认 CLI 已安装并在 `PATH` 中，或在 `agent.options.cmd` 写绝对路径。
+- `src/config/**`
+- `src/adapters/platform/**`
+- `src/adapters/agent/parsers.ts`
+- `src/ipc/**`
+- `src/scheduler/**`
+- `src/runtime/**`
 
-2. `session is busy`
-- 同一会话正在处理请求，等待当前请求结束再发送。
+## 常见问题
 
-3. IPC 无法连接
-- 先确认 `start` 已启动，并检查 `dataDir/ipc.sock` 是否存在。
+### `agent cli not found`
 
-4. cron 没有回投到 IM
-- 先确认对应 `sessionKey` 最近至少收到过一次真实平台消息；异步回投依赖持久化的 `DeliveryTarget`。
+- 确认对应 CLI 已安装并可在 `PATH` 中执行
+- 或在 `agent.options.cmd` 里写绝对路径
+
+### `session is busy`
+
+- 同一个逻辑 session 正在处理上一条请求
+- 等当前请求结束后再发，或先 `/new` 创建新 session
+
+### IPC 无法连接
+
+- 确认 daemon 已启动
+- 确认 `dataDir/ipc.sock` 已创建
+- 检查是否有旧的异常 socket 残留
+
+### cron 没有回投到 IM
+
+- 先确认该 `sessionKey` 最近是否收到过至少一条真实平台消息
+- 异步回投依赖持久化的 `DeliveryTarget`
+- DingTalk 场景还要额外检查 `sessionWebhook` 是否已经过期
