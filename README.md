@@ -44,7 +44,7 @@ d-connect init
 
 执行后会进入一个交互式 TUI 向导，用来填写项目名、Agent 类型、工作目录和平台凭证：
 
-![Init 配置 TUI](docs/readme-assets/init-config-tui.png)
+<img width="446" height="344" alt="init 配置 TUI" src="https://github.com/user-attachments/assets/f75348af-8869-480f-a78e-7d88b60b06c3" />
 
 ### 3. 启动守护进程
 
@@ -56,29 +56,29 @@ d-connect start
 
 ## 功能展示
 
-### 1. 自然语言定时任务
+### 1. 定时任务
 
 可以在聊天里直接发送 `/loop` 请求，把自然语言需求转成可执行的定时任务。
 
-![自然语言定时任务](docs/readme-assets/scheduled-tasks.png)
+<img width="603" height="1311" alt="定时任务" src="https://github.com/user-attachments/assets/ffd4b955-e8c0-4123-ad51-9c1de46fd838" />
 
 ### 2. 语音输入
 
 支持把语音识别结果纳入同一会话流程，适合移动端快速提问，不需要手打长文本。
 
-![语音输入](docs/readme-assets/voice-input.png)
+<img width="603" height="1311" alt="支持语音输入" src="https://github.com/user-attachments/assets/0f9f89f8-0ff4-4bdb-8b77-bf805729b246" />
 
 ### 3. 图片识别与理解
 
 在 `DingTalk` 里直接发图，`d-connect` 会下载媒体文件并把本地路径注入给 Agent，适合“看图说明”“读截图排障”等场景。
 
-![图片识别](docs/readme-assets/image-understanding.png)
+<img width="603" height="1311" alt="图片识别" src="https://github.com/user-attachments/assets/6315f6ea-45c1-453b-9054-f775c6ad7833" />
 
 ### 4. Guard 安全拦截
 
 支持按项目开启 Guard。命中敏感规则时，请求会在进入 Agent 之前被拦截。
 
-![Guard 拦截](docs/readme-assets/guard-intercept.png)
+<img width="603" height="1311" alt="可配置 guard 拦截" src="https://github.com/user-attachments/assets/1d3bedb5-62cf-40c2-8624-17e5154b7a6c" />
 
 ## 配置示例
 
