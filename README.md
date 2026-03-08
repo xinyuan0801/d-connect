@@ -29,7 +29,20 @@
 
 ## 安装与构建
 
-仓库当前未发布到 npm，建议直接从源码安装：
+已发布的 npm 包名：
+
+```bash
+@xinyuan0801/d-connect
+```
+
+全局安装：
+
+```bash
+npm install -g @xinyuan0801/d-connect
+d-connect help
+```
+
+如果你需要从源码安装：
 
 ```bash
 pnpm install

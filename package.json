@@ -1,5 +1,5 @@
 {
-  "name": "d-connect",
+  "name": "@xinyuan0801/d-connect",
   "version": "0.1.0",
   "type": "module",
   "description": "Bridge local coding agents to DingTalk and Feishu",
@@ -25,6 +25,9 @@
     "README.md",
     "LICENSE"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "d-connect": "./dist/index.js"
   },
