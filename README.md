@@ -51,6 +51,7 @@
 - Node.js `>=22`
 - 已安装并能直接执行至少一个 Agent CLI：`claude`、`qodercli` 或 `iflow`
 - 如果要接真实 IM，还需要对应平台的机器人凭证
+- 凭证获取[参考](https://github.com/xinyuan0801/d-connect/blob/main/docs/dingtalk_credential.md)
 
 ### 1. 安装
 
