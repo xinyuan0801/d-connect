@@ -14,7 +14,12 @@ import {
   shouldFinishByNoResultState,
   type IFlowPendingToolState,
 } from "../src/adapters/agent/iflow.js";
-import { extractAssistantParts, extractLatestExecutionInfo, sanitizeIFlowAssistantText } from "../src/adapters/agent/iflow-transcript.js";
+import {
+  extractAssistantParts,
+  extractLatestExecutionInfo,
+  iflowProjectKey,
+  sanitizeIFlowAssistantText,
+} from "../src/adapters/agent/iflow-transcript.js";
 import { Logger } from "../src/logging.js";
 
 function createState(): IFlowPendingToolState {
@@ -42,6 +47,25 @@ describe("iflow pending tool tracking", () => {
     await utimes(newTranscript, startedAtMs / 1000 + 1, startedAtMs / 1000 + 1);
 
     expect(await findLatestTranscript(sessionDir, startedAtMs)).toBe(newTranscript);
+  });
+
+  test("findLatestTranscript also scans .iflow-aone fallback directories", async () => {
+    const root = await mkdtemp(join(tmpdir(), "d-connect-iflow-fallback-"));
+    const primaryDir = join(root, ".iflow", "projects", "demo");
+    const fallbackDir = join(root, ".iflow-aone", "projects", "demo");
+    await mkdir(primaryDir, { recursive: true });
+    await mkdir(fallbackDir, { recursive: true });
+
+    const oldTranscript = join(primaryDir, "session-old.jsonl");
+    const fallbackTranscript = join(fallbackDir, "session-fallback.jsonl");
+    await writeFile(oldTranscript, "", "utf8");
+    await writeFile(fallbackTranscript, "", "utf8");
+
+    const startedAtMs = Date.now();
+    await utimes(oldTranscript, startedAtMs / 1000 - 5, startedAtMs / 1000 - 5);
+    await utimes(fallbackTranscript, startedAtMs / 1000 + 1, startedAtMs / 1000 + 1);
+
+    expect(await findLatestTranscript([primaryDir, fallbackDir], startedAtMs)).toBe(fallbackTranscript);
   });
 
   test("does not re-queue a completed tool when assistant repeats the same tool_use", () => {
@@ -182,6 +206,75 @@ describe("iflow pending tool tracking", () => {
     expect(delta.truncated).toBe(false);
     expect(delta.chunk).toContain("第二段");
     expect(delta.nextOffset).toBe(Buffer.byteLength(`${first}${second}`, "utf8"));
+  });
+
+  test("loadNewTranscript falls back to .iflow-aone after .iflow misses", async () => {
+    const originalHome = process.env.HOME;
+    const originalUserProfile = process.env.USERPROFILE;
+    const homeRoot = await mkdtemp(join(tmpdir(), "d-connect-iflow-home-"));
+    const workDir = await mkdtemp(join(tmpdir(), "d-connect-iflow-work-"));
+    process.env.HOME = homeRoot;
+    process.env.USERPROFILE = homeRoot;
+
+    const adapter = new IFlowAdapter(
+      {
+        workDir,
+      },
+      new Logger("error"),
+    );
+
+    try {
+      const session = (await adapter.startSession("session-fallback")) as any;
+      const turn = {
+        transcriptPath: undefined,
+        transcriptBindingSource: undefined,
+        outputFilePath: undefined,
+        offset: 0,
+        partial: "",
+        outputProbe: "",
+        resultChunks: [],
+        lastTextAt: 0,
+        lastActivityAt: Date.now(),
+        lastToolActivityAt: 0,
+        hadToolActivity: false,
+        awaitingPostToolResponse: false,
+        pendingTools: new Map(),
+        seenToolUseIds: new Set(),
+        completedToolUseIds: new Set(),
+        pendingStartedAt: 0,
+        pendingTimeoutMs: adapter.pendingToolTimeoutMs(),
+        startedAt: Date.now(),
+      };
+
+      session.bindTranscriptBySessionId(turn, "session-fallback", "test");
+      await session.loadNewTranscript(turn);
+      expect(turn.resultChunks).toEqual([]);
+
+      const fallbackDir = join(homeRoot, ".iflow-aone", "projects", iflowProjectKey(workDir));
+      const fallbackTranscript = join(fallbackDir, "session-fallback.jsonl");
+      await mkdir(fallbackDir, { recursive: true });
+      await writeFile(
+        fallbackTranscript,
+        '{"type":"assistant","message":{"content":[{"type":"text","text":"来自 .iflow-aone 的 transcript"}]}}\n',
+        "utf8",
+      );
+
+      await session.loadNewTranscript(turn);
+      expect(turn.transcriptPath).toBe(fallbackTranscript);
+      expect(turn.resultChunks).toEqual(["来自 .iflow-aone 的 transcript"]);
+    } finally {
+      await adapter.stop();
+      if (originalHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = originalHome;
+      }
+      if (originalUserProfile === undefined) {
+        delete process.env.USERPROFILE;
+      } else {
+        process.env.USERPROFILE = originalUserProfile;
+      }
+    }
   });
 
   test("extracts session id from execution info block", () => {

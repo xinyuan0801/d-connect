@@ -35,6 +35,7 @@ const TURN_NO_RESULT_TIMEOUT_MS = 60000;
 const TRANSCRIPT_READ_MAX_BYTES_PER_POLL = 256 * 1024;
 const PROCESS_OUTPUT_PROBE_MAX_LEN = 20000;
 const IFLOW_OUTPUT_FILE_ROOT = "d-connect-iflow-output";
+const IFLOW_TRANSCRIPT_ROOT_DIRS = [".iflow", ".iflow-aone"] as const;
 
 interface TranscriptLine {
   sessionId?: string;
@@ -348,12 +349,12 @@ async function fileSize(path: string): Promise<number> {
   }
 }
 
-export async function findLatestTranscript(sessionDir: string, startedAtMs: number): Promise<string | undefined> {
+async function collectLatestTranscriptCandidates(sessionDir: string, startedAtMs: number): Promise<Array<{ path: string; mtimeMs: number }>> {
   let entries;
   try {
     entries = await readdir(sessionDir, { withFileTypes: true });
   } catch {
-    return undefined;
+    return [];
   }
 
   const candidates: Array<{ path: string; mtimeMs: number }> = [];
@@ -378,6 +379,15 @@ export async function findLatestTranscript(sessionDir: string, startedAtMs: numb
       // skip
     }
   }
+
+  return candidates;
+}
+
+export async function findLatestTranscript(sessionDir: string | readonly string[], startedAtMs: number): Promise<string | undefined> {
+  const sessionDirs = Array.isArray(sessionDir) ? sessionDir : [sessionDir];
+  const candidates = (
+    await Promise.all(sessionDirs.map((dir) => collectLatestTranscriptCandidates(dir, startedAtMs)))
+  ).flat();
 
   candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
   return candidates[0]?.path;
@@ -422,7 +432,10 @@ class IFlowSession extends EventEmitter implements AgentSession {
     }
 
     this.setAgentSessionId(normalizedSessionId);
-    const expectedPath = join(this.adapter.sessionDir, `${normalizedSessionId}.jsonl`);
+    const expectedPath = this.adapter.resolveTranscriptPath(normalizedSessionId, turn.transcriptPath);
+    if (!expectedPath) {
+      return;
+    }
 
     if (turn.transcriptPath === expectedPath) {
       turn.transcriptBindingSource = "session-id";
@@ -512,8 +525,16 @@ class IFlowSession extends EventEmitter implements AgentSession {
       this.bindTranscriptBySessionId(turn, this.currentSessionId(), "session-state");
     }
 
+    const resolvedTranscriptPath = this.adapter.resolveTranscriptPath(this.currentSessionId(), turn.transcriptPath);
+    if (resolvedTranscriptPath && resolvedTranscriptPath !== turn.transcriptPath) {
+      turn.transcriptPath = resolvedTranscriptPath;
+      turn.transcriptBindingSource = "session-id";
+      turn.offset = 0;
+      turn.partial = "";
+    }
+
     if (!turn.transcriptPath) {
-      turn.transcriptPath = await findLatestTranscript(this.adapter.sessionDir, turn.startedAt);
+      turn.transcriptPath = await findLatestTranscript(this.adapter.sessionDirs, turn.startedAt);
       if (!turn.transcriptPath) {
         return;
       }
@@ -911,7 +932,34 @@ export class IFlowAdapter implements AgentAdapter, ModelSwitchable {
   }
 
   get sessionDir(): string {
-    return join(homedir(), ".iflow", "projects", iflowProjectKey(normalizePath(this.workDir)));
+    return this.sessionDirs[0];
+  }
+
+  get sessionDirs(): string[] {
+    const projectKey = iflowProjectKey(normalizePath(this.workDir));
+    return IFLOW_TRANSCRIPT_ROOT_DIRS.map((rootDir) => join(homedir(), rootDir, "projects", projectKey));
+  }
+
+  resolveTranscriptPath(sessionId: string, preferredPath?: string): string | undefined {
+    const normalizedSessionId = sessionId.trim();
+    if (!normalizedSessionId) {
+      return undefined;
+    }
+
+    const candidates = this.sessionDirs.map((dir) => join(dir, `${normalizedSessionId}.jsonl`));
+    const hasPreferredCandidate = Boolean(preferredPath) && candidates.includes(preferredPath);
+    const orderedCandidates =
+      hasPreferredCandidate
+        ? [preferredPath, ...candidates.filter((candidate) => candidate !== preferredPath)]
+        : candidates;
+
+    for (const candidate of orderedCandidates) {
+      if (existsSync(candidate)) {
+        return candidate;
+      }
+    }
+
+    return hasPreferredCandidate ? preferredPath : candidates[0];
   }
 
   getMode(): string {
