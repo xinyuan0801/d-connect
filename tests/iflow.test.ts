@@ -489,6 +489,7 @@ How can I assist you today?
       pendingStartedAt: Date.now() - 181000,
       pendingTimeoutMs: 180000,
       lastTextAt: 0,
+      lastActivityAt: Date.now() - 181000,
     };
 
     expect(session.shouldFinishByToolTimeout(turn)).toBe(true);
@@ -501,6 +502,74 @@ How can I assist you today?
       timeoutMs: 180000,
       mode: "yolo",
     });
+
+    await adapter.stop();
+    vi.useRealTimers();
+  });
+
+  test("tool timeout ignores old pending tools when newer transcript activity exists", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-08T10:04:44.000Z"));
+
+    const adapter = new IFlowAdapter(
+      {
+        workDir: "/Users/felixwang/Desktop/d-connect",
+      },
+      new Logger("error"),
+    );
+
+    const session = (await adapter.startSession("session-timeout-active")) as any;
+    const turn = {
+      resultChunks: [],
+      pendingTools: new Map([["ReadCommandOutput:0", "ReadCommandOutput"]]),
+      pendingStartedAt: Date.now() - 181000,
+      pendingTimeoutMs: 180000,
+      lastTextAt: 0,
+      lastActivityAt: Date.now() - 10000,
+    };
+
+    expect(session.shouldFinishByToolTimeout(turn)).toBe(false);
+    expect(turn.pendingTools.size).toBe(1);
+
+    await adapter.stop();
+    vi.useRealTimers();
+  });
+
+  test("hard timeout waits for transcript inactivity instead of total turn age", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-08T10:04:44.000Z"));
+
+    const adapter = new IFlowAdapter(
+      {
+        workDir: "/Users/felixwang/Desktop/d-connect",
+      },
+      new Logger("error"),
+    );
+
+    const session = (await adapter.startSession("session-hard-timeout")) as any;
+    const activeTurn = {
+      resultChunks: [],
+      pendingTools: new Map([["call_read:0", "ReadCommandOutput"]]),
+      pendingStartedAt: Date.now() - 180000,
+      pendingTimeoutMs: 180000,
+      lastTextAt: 0,
+      lastActivityAt: Date.now() - 10000,
+      startedAt: Date.now() - 121000,
+    };
+
+    expect(session.shouldFinishByHardTimeout(activeTurn)).toBe(false);
+    expect(activeTurn.resultChunks).toEqual([]);
+
+    const stalledTurn = {
+      ...activeTurn,
+      pendingTools: new Map([["call_read:0", "ReadCommandOutput"]]),
+      resultChunks: [],
+      lastActivityAt: Date.now() - 121000,
+    };
+
+    expect(session.shouldFinishByHardTimeout(stalledTurn)).toBe(true);
+    expect(stalledTurn.resultChunks).toEqual(["iflow turn timeout"]);
+    expect(stalledTurn.pendingTools.size).toBe(0);
 
     await adapter.stop();
     vi.useRealTimers();

@@ -645,7 +645,8 @@ class IFlowSession extends EventEmitter implements AgentSession {
     if (turn.pendingTools.size === 0 || turn.pendingStartedAt === 0) {
       return false;
     }
-    if (Date.now() - turn.pendingStartedAt < turn.pendingTimeoutMs) {
+    const latestActivityAt = Math.max(turn.pendingStartedAt, turn.lastActivityAt);
+    if (Date.now() - latestActivityAt < turn.pendingTimeoutMs) {
       return false;
     }
 
@@ -682,7 +683,8 @@ class IFlowSession extends EventEmitter implements AgentSession {
   }
 
   private shouldFinishByHardTimeout(turn: TurnState): boolean {
-    if (Date.now() - turn.startedAt < TURN_HARD_TIMEOUT_MS) {
+    const latestActivityAt = Math.max(turn.startedAt, turn.lastActivityAt);
+    if (Date.now() - latestActivityAt < TURN_HARD_TIMEOUT_MS) {
       return false;
     }
     if (turn.resultChunks.length === 0) {
