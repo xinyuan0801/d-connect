@@ -1,8 +1,8 @@
 import { EventEmitter } from "node:events";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { open, readdir, stat } from "node:fs/promises";
-import { homedir } from "node:os";
+import { mkdir, open, readFile, readdir, stat } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { Logger } from "../../logging.js";
@@ -29,14 +29,12 @@ const TRANSCRIPT_POLL_MS = 200;
 const TURN_IDLE_MS = 900;
 const TURN_IDLE_AFTER_TOOL_MS = 5000;
 const TURN_POST_TOOL_RESPONSE_TIMEOUT_MS = 60000;
-const PENDING_TOOL_TIMEOUT_MS = 60000;
+const PENDING_TOOL_TIMEOUT_MS = 180000;
 const TURN_HARD_TIMEOUT_MS = 120000;
 const TURN_NO_RESULT_TIMEOUT_MS = 60000;
-const POST_TOOL_SESSION_RETRY_MAX = 1;
 const TRANSCRIPT_READ_MAX_BYTES_PER_POLL = 256 * 1024;
 const PROCESS_OUTPUT_PROBE_MAX_LEN = 20000;
-const POST_TOOL_SESSION_RETRY_PROMPT =
-  "Continue from the latest tool results and provide the final user-facing reply now. Do not ask follow-up questions.";
+const IFLOW_OUTPUT_FILE_ROOT = "d-connect-iflow-output";
 
 interface TranscriptLine {
   sessionId?: string;
@@ -53,9 +51,23 @@ interface SpawnResult {
   signal: NodeJS.Signals | null;
 }
 
+interface IFlowExecutionSummary {
+  sessionId?: string;
+  conversationId?: string;
+  assistantRounds?: number;
+  executionTimeMs?: number;
+  terminationReason?: string;
+  tokenUsage?: {
+    input?: number;
+    output?: number;
+    total?: number;
+  };
+}
+
 interface TurnState {
   transcriptPath?: string;
   transcriptBindingSource?: "session-id" | "mtime";
+  outputFilePath?: string;
   offset: number;
   partial: string;
   outputProbe: string;
@@ -157,6 +169,74 @@ export interface TranscriptTailReadResult {
   nextOffset: number;
 }
 
+function pickOptionValue(args: string[], aliases: readonly string[]): string | undefined {
+  for (let index = 0; index < args.length; index += 1) {
+    const current = args[index];
+    for (const alias of aliases) {
+      if (current === alias) {
+        const next = args[index + 1];
+        return typeof next === "string" && next.length > 0 ? next : undefined;
+      }
+      if (current.startsWith(`${alias}=`)) {
+        const [, value] = current.split("=", 2);
+        return value && value.length > 0 ? value : undefined;
+      }
+    }
+  }
+  return undefined;
+}
+
+function hasOutputFileArg(args: string[]): boolean {
+  return Boolean(pickOptionValue(args, ["--output-file", "--output_file", "-o"]));
+}
+
+function readNumber(value: unknown): number | undefined {
+  return typeof value === "number" ? value : undefined;
+}
+
+function parseExecutionSummaryFromJson(raw: string): IFlowExecutionSummary | undefined {
+  const text = raw.trim();
+  if (!text) {
+    return undefined;
+  }
+
+  const parsed = safeJsonParse<Record<string, unknown>>(text);
+  if (!parsed) {
+    return undefined;
+  }
+
+  const sessionId = typeof parsed["session-id"] === "string" ? parsed["session-id"] : undefined;
+  const conversationId = typeof parsed["conversation-id"] === "string" ? parsed["conversation-id"] : undefined;
+  const assistantRounds = readNumber(parsed.assistantRounds);
+  const executionTimeMs = readNumber(parsed.executionTimeMs);
+  const terminationReason = typeof parsed.terminationReason === "string" ? parsed.terminationReason : undefined;
+  const tokenUsageRaw =
+    parsed.tokenUsage && typeof parsed.tokenUsage === "object" && !Array.isArray(parsed.tokenUsage)
+      ? (parsed.tokenUsage as Record<string, unknown>)
+      : undefined;
+  const tokenUsage =
+    tokenUsageRaw
+      ? {
+          input: readNumber(tokenUsageRaw.input),
+          output: readNumber(tokenUsageRaw.output),
+          total: readNumber(tokenUsageRaw.total),
+        }
+      : undefined;
+
+  if (!sessionId && !conversationId && assistantRounds === undefined && executionTimeMs === undefined && !terminationReason && !tokenUsage) {
+    return undefined;
+  }
+
+  return {
+    sessionId,
+    conversationId,
+    assistantRounds,
+    executionTimeMs,
+    terminationReason,
+    tokenUsage,
+  };
+}
+
 export async function readTranscriptDeltaFromFile(
   path: string,
   offset: number,
@@ -249,25 +329,6 @@ export function shouldFinishByNoResultState(
     return false;
   }
   return now - state.startedAt >= TURN_NO_RESULT_TIMEOUT_MS;
-}
-
-export function shouldRetryPostToolInSession(state: {
-  awaitingPostToolResponse: boolean;
-  pendingTools: Map<string, string>;
-  sessionId: string;
-  retryCount: number;
-  maxRetryCount: number;
-}): boolean {
-  if (!state.awaitingPostToolResponse) {
-    return false;
-  }
-  if (state.pendingTools.size > 0) {
-    return false;
-  }
-  if (state.sessionId.length === 0) {
-    return false;
-  }
-  return state.retryCount < state.maxRetryCount;
 }
 
 function safeJsonParse<T>(line: string): T | null {
@@ -400,6 +461,38 @@ class IFlowSession extends EventEmitter implements AgentSession {
     }
 
     this.bindTranscriptBySessionId(turn, info.sessionId, "execution-info");
+  }
+
+  private async loadExecutionInfoFromOutputFile(turn: TurnState): Promise<void> {
+    if (!turn.outputFilePath) {
+      return;
+    }
+
+    let content = "";
+    try {
+      content = await readFile(turn.outputFilePath, "utf8");
+    } catch {
+      return;
+    }
+
+    const summary = parseExecutionSummaryFromJson(content);
+    if (!summary) {
+      return;
+    }
+
+    if (summary.sessionId) {
+      this.bindTranscriptBySessionId(turn, summary.sessionId, "output-file");
+    }
+
+    this.adapter.logger.info("iflow execution info", {
+      outputFile: turn.outputFilePath,
+      sessionId: summary.sessionId,
+      conversationId: summary.conversationId,
+      assistantRounds: summary.assistantRounds,
+      executionTimeMs: summary.executionTimeMs,
+      terminationReason: summary.terminationReason,
+      tokenUsage: summary.tokenUsage,
+    });
   }
 
   private emitAgentEvent(event: AgentEvent): void {
@@ -651,7 +744,8 @@ class IFlowSession extends EventEmitter implements AgentSession {
     turn: TurnState,
     tails: { stdout: string; stderr: string },
   ): Promise<SpawnResult> {
-    const iflowArgs = this.adapter.buildIFlowArgs(prompt, continueConversation, this.agentSessionId);
+    turn.outputFilePath = await this.adapter.nextOutputFilePath();
+    const iflowArgs = this.adapter.buildIFlowArgs(prompt, continueConversation, this.agentSessionId, turn.outputFilePath);
     this.adapter.logger.debug("spawn iflow turn", {
       command: this.adapter.command,
       args: iflowArgs,
@@ -682,6 +776,7 @@ class IFlowSession extends EventEmitter implements AgentSession {
 
     try {
       const result = await Promise.race([this.waitForTurnResult(child, turn), spawnError]);
+      await this.loadExecutionInfoFromOutputFile(turn);
       await this.loadNewTranscript(turn);
       return result;
     } finally {
@@ -707,6 +802,7 @@ class IFlowSession extends EventEmitter implements AgentSession {
       const turn: TurnState = {
         transcriptPath: undefined,
         transcriptBindingSource: undefined,
+        outputFilePath: undefined,
         offset: 0,
         partial: "",
         outputProbe: "",
@@ -729,34 +825,7 @@ class IFlowSession extends EventEmitter implements AgentSession {
         turn.offset = await fileSize(turn.transcriptPath);
       }
 
-      let result = await this.runSingleTurn(prompt, this.sentOnce, turn, tails);
-
-      let retryCount = 0;
-      while (
-        shouldRetryPostToolInSession({
-          awaitingPostToolResponse: turn.awaitingPostToolResponse,
-          pendingTools: turn.pendingTools,
-          sessionId: this.currentSessionId(),
-          retryCount,
-          maxRetryCount: POST_TOOL_SESSION_RETRY_MAX,
-        })
-      ) {
-        retryCount += 1;
-        this.adapter.logger.warn("iflow turn ended after tool without final text, retrying in-session", {
-          sessionId: this.currentSessionId(),
-          retryCount,
-          maxRetryCount: POST_TOOL_SESSION_RETRY_MAX,
-        });
-
-        turn.startedAt = Date.now();
-        turn.lastActivityAt = turn.startedAt;
-        turn.lastToolActivityAt = turn.startedAt;
-        if (turn.pendingTools.size > 0) {
-          turn.pendingStartedAt = turn.startedAt;
-        }
-
-        result = await this.runSingleTurn(POST_TOOL_SESSION_RETRY_PROMPT, true, turn, tails);
-      }
+      const result = await this.runSingleTurn(prompt, this.sentOnce, turn, tails);
 
       if (turn.awaitingPostToolResponse) {
         turn.resultChunks.push("iflow 在工具执行后结束了当前轮次，但没有产出最终回复；已保留底层续聊状态。");
@@ -827,6 +896,7 @@ export class IFlowAdapter implements AgentAdapter, ModelSwitchable {
   private modelValue: string;
   private readonly extraArgs: string[];
   private readonly extraEnv: Record<string, string>;
+  private readonly configuredOutputFilePath?: string;
 
   private readonly sessions = new Set<IFlowSession>();
 
@@ -836,6 +906,8 @@ export class IFlowAdapter implements AgentAdapter, ModelSwitchable {
     this.modelValue = options.model ?? "";
     this.extraArgs = Array.isArray(options.args) ? [...options.args] : [];
     this.extraEnv = options.env ? { ...options.env } : {};
+    const outputFileArg = pickOptionValue(this.extraArgs, ["--output-file", "--output_file", "-o"]);
+    this.configuredOutputFilePath = outputFileArg ? resolve(this.workDir, outputFileArg) : undefined;
   }
 
   get sessionDir(): string {
@@ -854,7 +926,17 @@ export class IFlowAdapter implements AgentAdapter, ModelSwitchable {
     return this.modelValue;
   }
 
-  buildIFlowArgs(prompt: string, continueConversation: boolean, sessionId = ""): string[] {
+  async nextOutputFilePath(): Promise<string | undefined> {
+    if (this.configuredOutputFilePath) {
+      return this.configuredOutputFilePath;
+    }
+
+    const dir = join(tmpdir(), IFLOW_OUTPUT_FILE_ROOT, iflowProjectKey(this.workDir));
+    await mkdir(dir, { recursive: true });
+    return join(dir, `${Date.now()}-${randomUUID()}.json`);
+  }
+
+  buildIFlowArgs(prompt: string, continueConversation: boolean, sessionId = "", outputFilePath?: string): string[] {
     const args: string[] = [...this.extraArgs];
 
     if (this.modelValue && this.modelValue.length > 0) {
@@ -867,6 +949,10 @@ export class IFlowAdapter implements AgentAdapter, ModelSwitchable {
       args.push("-r", sessionId);
     } else if (continueConversation) {
       args.push("-c");
+    }
+
+    if (outputFilePath && !hasOutputFileArg(args)) {
+      args.push("--output-file", outputFilePath);
     }
 
     args.push("-p", prompt);

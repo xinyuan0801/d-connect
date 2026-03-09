@@ -10,7 +10,6 @@ import {
   recordToolResults,
   readTranscriptDelta,
   readTranscriptDeltaFromFile,
-  shouldRetryPostToolInSession,
   shouldFinishByIdleState,
   shouldFinishByNoResultState,
   type IFlowPendingToolState,
@@ -112,6 +111,37 @@ describe("iflow pending tool tracking", () => {
     const args = adapter.buildIFlowArgs("hello", false);
     expect(args).toContain("-p");
     expect(args).not.toContain("-i");
+  });
+
+  test("buildIFlowArgs appends --output-file when turn output path is provided", () => {
+    const adapter = createIFlowAdapter(
+      {
+        workDir: "/Users/felixwang/Desktop/d-connect",
+      },
+      new Logger("error"),
+    );
+
+    const outputFile = "/tmp/d-connect-iflow-output/test.json";
+    const args = adapter.buildIFlowArgs("hello", false, "", outputFile);
+    const outputFlagIndex = args.indexOf("--output-file");
+
+    expect(outputFlagIndex).toBeGreaterThanOrEqual(0);
+    expect(args[outputFlagIndex + 1]).toBe(outputFile);
+  });
+
+  test("buildIFlowArgs does not duplicate --output-file when user args already include it", () => {
+    const adapter = createIFlowAdapter(
+      {
+        workDir: "/Users/felixwang/Desktop/d-connect",
+        args: ["--output-file", "/tmp/custom-iflow-output.json"],
+      },
+      new Logger("error"),
+    );
+
+    const args = adapter.buildIFlowArgs("hello", false, "", "/tmp/ignored.json");
+    expect(args.filter((arg) => arg === "--output-file")).toHaveLength(1);
+    expect(args).toContain("/tmp/custom-iflow-output.json");
+    expect(args).not.toContain("/tmp/ignored.json");
   });
 
   test("spawnEnv prepends node executable directory using platform delimiter", () => {
@@ -252,48 +282,6 @@ describe("iflow pending tool tracking", () => {
     vi.useRealTimers();
   });
 
-  test("post-tool fallback retry requires session id and no pending tools", () => {
-    expect(
-      shouldRetryPostToolInSession({
-        awaitingPostToolResponse: true,
-        pendingTools: new Map(),
-        sessionId: "session-1",
-        retryCount: 0,
-        maxRetryCount: 1,
-      }),
-    ).toBe(true);
-
-    expect(
-      shouldRetryPostToolInSession({
-        awaitingPostToolResponse: true,
-        pendingTools: new Map([["tool-1", "run_shell_command"]]),
-        sessionId: "session-1",
-        retryCount: 0,
-        maxRetryCount: 1,
-      }),
-    ).toBe(false);
-
-    expect(
-      shouldRetryPostToolInSession({
-        awaitingPostToolResponse: true,
-        pendingTools: new Map(),
-        sessionId: "",
-        retryCount: 0,
-        maxRetryCount: 1,
-      }),
-    ).toBe(false);
-
-    expect(
-      shouldRetryPostToolInSession({
-        awaitingPostToolResponse: true,
-        pendingTools: new Map(),
-        sessionId: "session-1",
-        retryCount: 1,
-        maxRetryCount: 1,
-      }),
-    ).toBe(false);
-  });
-
   test("preserves assistant content order between text and tool_use", () => {
     expect(
       extractAssistantParts([
@@ -382,8 +370,8 @@ How can I assist you today?
     const turn = {
       resultChunks: ["我来帮你创建这个定时任务。"],
       pendingTools: new Map([["run_shell_command:0", "run_shell_command"]]),
-      pendingStartedAt: Date.now() - 61000,
-      pendingTimeoutMs: 60000,
+      pendingStartedAt: Date.now() - 181000,
+      pendingTimeoutMs: 180000,
       lastTextAt: 0,
     };
 
@@ -394,7 +382,7 @@ How can I assist you today?
     expect(warnSpy).toHaveBeenCalledWith("iflow tool execution timed out", {
       sessionId: "session-timeout",
       pendingTools: ["run_shell_command"],
-      timeoutMs: 60000,
+      timeoutMs: 180000,
       mode: "yolo",
     });
 
