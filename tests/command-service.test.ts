@@ -133,7 +133,8 @@ describe("command service", () => {
       session,
       raw: "/new review",
     }));
-    expect(created).toMatch(/created session/);
+    expect(created).toMatch(/created and switched to session/);
+    expect(created).toContain("(review)");
 
     const list = expectHandled(await service.handle({
       runtime,

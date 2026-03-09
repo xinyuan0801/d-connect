@@ -72,6 +72,19 @@ function summarizeAgentToolInput(toolInputRaw?: Record<string, unknown>): string
   return "";
 }
 
+function normalizeToolDescription(event: AgentEvent): string {
+  if (event.toolName === "Agent") {
+    return "";
+  }
+
+  const toolInputRaw = event.toolInputRaw;
+  if (!toolInputRaw) {
+    return "";
+  }
+
+  return normalizeInlineText(pickString(toolInputRaw, ["description"]), MAX_TOOL_INPUT_LENGTH);
+}
+
 function normalizeToolInput(event: AgentEvent): string {
   if (event.toolName === "Agent") {
     const summarized = summarizeAgentToolInput(event.toolInputRaw);
@@ -93,12 +106,16 @@ function createEventRenderState(): EventRenderState {
   };
 }
 
-function renderToolRunning(use: PendingToolUse): string {
+function renderToolRunning(use: PendingToolUse & { description?: string }): string {
   const header = `${TOOL_CALL_EMOJI} ${use.toolName}`;
-  if (!use.toolInput) {
-    return header;
+  const lines = [header];
+  if (use.description) {
+    lines.push(use.description);
   }
-  return `${header}\n${wrapInlineCode(use.toolInput)}`;
+  if (use.toolInput) {
+    lines.push(wrapInlineCode(use.toolInput));
+  }
+  return lines.join("\n");
 }
 
 function flushPendingToolUseMessages(_state: EventRenderState): string[] {
@@ -107,17 +124,21 @@ function flushPendingToolUseMessages(_state: EventRenderState): string[] {
 
 function renderToolUseEvent(event: AgentEvent, state: EventRenderState): string[] {
   const toolName = event.toolName?.trim() || "unknown";
+  const description = normalizeToolDescription(event);
   const toolInput = normalizeToolInput(event);
   const requestId = event.requestId?.trim();
   if (requestId) {
     state.toolNames.set(requestId, toolName);
   }
 
+  const effectiveToolInput = description && toolInput === description ? "" : toolInput;
+
   return [
     renderToolRunning({
       toolName,
       requestId,
-      toolInput: toolInput || undefined,
+      description: description || undefined,
+      toolInput: effectiveToolInput || undefined,
     }),
   ];
 }

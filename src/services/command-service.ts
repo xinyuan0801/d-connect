@@ -111,7 +111,7 @@ export class CommandService {
         return handled([
           "commands:",
           "/help",
-          "/new [name]",
+          "/new [name]  create and switch to a new session",
           "/list",
           "/switch <id|name>",
           "/stop",
@@ -125,7 +125,7 @@ export class CommandService {
         const name = parts.slice(1).join(" ").trim() || `session-${Date.now()}`;
         const created = this.conversations.createSession(project, sessionKey, name);
         await this.conversations.save();
-        return handled(`created session ${created.id} (${created.name})`);
+        return handled(`created and switched to session ${created.id} (${created.name})`);
       }
 
       case "list": {

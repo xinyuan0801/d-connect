@@ -149,7 +149,7 @@ d-connect start
 | 命令 | 作用 |
 | --- | --- |
 | `/help` | 查看命令帮助 |
-| `/new [name]` | 新建逻辑 session |
+| `/new [name]` | 新建并切换到一个逻辑 session |
 | `/list` | 列出当前聊天对象下的 session |
 | `/switch <id|name>` | 切换到指定 session |
 | `/stop` | 停止当前活跃 session 对应的 Agent 进程 |

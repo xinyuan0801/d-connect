@@ -65,6 +65,13 @@ interface IFlowExecutionSummary {
   };
 }
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
+}
+
 interface TurnState {
   transcriptPath?: string;
   transcriptBindingSource?: "session-id" | "mtime";
@@ -84,6 +91,8 @@ interface TurnState {
   pendingStartedAt: number;
   pendingTimeoutMs: number;
   startedAt: number;
+  lastToolResultToolName?: string;
+  lastToolResultContent?: string;
 }
 
 export interface IFlowPendingToolState {
@@ -153,6 +162,14 @@ function appendLimited(prev: string, add: string, maxLen = 10000): string {
     return next;
   }
   return next.slice(next.length - maxLen);
+}
+
+function parseBackgroundCommandTaskId(raw: string | undefined): string | undefined {
+  if (!raw) {
+    return undefined;
+  }
+  const match = raw.match(/Command running in background with ID:\s*([^\s]+)/i);
+  return match?.[1];
 }
 
 export function readTranscriptDelta(full: Buffer, offset: number): { chunk: string; nextOffset: number } {
@@ -611,6 +628,7 @@ class IFlowSession extends EventEmitter implements AgentSession {
               requestId: tool.id,
               toolName: tool.name,
               toolInput: summarizeToolInput(tool.input),
+              toolInputRaw: asRecord(tool.input),
             });
           }
         }
@@ -619,11 +637,14 @@ class IFlowSession extends EventEmitter implements AgentSession {
       if (item.type === "user") {
         const toolResults = extractToolResults(item.message?.content);
         if (toolResults.length > 0) {
+          const pendingToolNames = new Map(toolResults.map((result) => [result.id, turn.pendingTools.get(result.id) ?? ""]));
           for (const result of recordToolResults(turn, toolResults)) {
             turn.hadToolActivity = true;
             turn.awaitingPostToolResponse = true;
             turn.lastToolActivityAt = Date.now();
             turn.lastActivityAt = turn.lastToolActivityAt;
+            turn.lastToolResultToolName = pendingToolNames.get(result.id) || undefined;
+            turn.lastToolResultContent = result.output;
             if (result.output.length > 0) {
               this.emitAgentEvent({
                 type: "tool_result",
@@ -694,6 +715,17 @@ class IFlowSession extends EventEmitter implements AgentSession {
     turn.pendingStartedAt = 0;
     turn.lastTextAt = Date.now();
     return true;
+  }
+
+  private buildPostToolFallback(turn: TurnState): string {
+    const backgroundTaskId =
+      turn.lastToolResultToolName === "run_shell_command"
+        ? parseBackgroundCommandTaskId(turn.lastToolResultContent)
+        : undefined;
+    if (backgroundTaskId) {
+      return `命令已在后台启动，任务 ID: ${backgroundTaskId}。`;
+    }
+    return "iflow 在工具执行后结束了当前轮次，但没有产出最终回复；已保留底层续聊状态。";
   }
 
   private async waitForTurnResult(child: ReturnType<typeof spawn>, turn: TurnState): Promise<SpawnResult> {
@@ -841,6 +873,8 @@ class IFlowSession extends EventEmitter implements AgentSession {
         pendingStartedAt: 0,
         pendingTimeoutMs: this.adapter.pendingToolTimeoutMs(),
         startedAt: Date.now(),
+        lastToolResultToolName: undefined,
+        lastToolResultContent: undefined,
       };
 
       this.bindTranscriptBySessionId(turn, this.currentSessionId(), "send-start");
@@ -851,7 +885,7 @@ class IFlowSession extends EventEmitter implements AgentSession {
       const result = await this.runSingleTurn(prompt, this.sentOnce, turn, tails);
 
       if (turn.awaitingPostToolResponse) {
-        turn.resultChunks.push("iflow 在工具执行后结束了当前轮次，但没有产出最终回复；已保留底层续聊状态。");
+        turn.resultChunks.push(this.buildPostToolFallback(turn));
       }
 
       const response = normalizeWhitespace(turn.resultChunks.join("\n\n"));

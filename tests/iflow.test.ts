@@ -277,6 +277,70 @@ describe("iflow pending tool tracking", () => {
     }
   });
 
+  test("loadNewTranscript includes tool input raw payload for tool_use events", async () => {
+    const root = await mkdtemp(join(tmpdir(), "d-connect-iflow-tool-raw-"));
+    const transcriptPath = join(root, "session-tool.jsonl");
+    await writeFile(
+      transcriptPath,
+      '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"call_1","name":"run_shell_command","input":{"description":"启动开发服务器","command":"pnpm run dev"}}]}}\n',
+      "utf8",
+    );
+
+    const adapter = new IFlowAdapter(
+      {
+        workDir: "/Users/felixwang/Desktop/d-connect",
+      },
+      new Logger("error"),
+    );
+
+    const session = (await adapter.startSession("session-tool-raw")) as any;
+    session.currentSessionId = () => "";
+    const events: Array<{ type?: string; toolName?: string; toolInput?: string; toolInputRaw?: Record<string, unknown> }> = [];
+    session.on("event", (event: { type?: string; toolName?: string; toolInput?: string; toolInputRaw?: Record<string, unknown> }) => {
+      events.push(event);
+    });
+
+    const turn = {
+      transcriptPath,
+      transcriptBindingSource: "session-id",
+      outputFilePath: undefined,
+      offset: 0,
+      partial: "",
+      outputProbe: "",
+      resultChunks: [],
+      lastTextAt: 0,
+      lastActivityAt: Date.now(),
+      lastToolActivityAt: 0,
+      hadToolActivity: false,
+      awaitingPostToolResponse: false,
+      pendingTools: new Map(),
+      seenToolUseIds: new Set(),
+      completedToolUseIds: new Set(),
+      pendingStartedAt: 0,
+      pendingTimeoutMs: adapter.pendingToolTimeoutMs(),
+      startedAt: Date.now(),
+      lastToolResultToolName: undefined,
+      lastToolResultContent: undefined,
+    };
+
+    await session.loadNewTranscript(turn);
+
+    expect(events).toEqual([
+      {
+        type: "tool_use",
+        requestId: "call_1",
+        toolName: "run_shell_command",
+        toolInput: "pnpm run dev",
+        toolInputRaw: {
+          description: "启动开发服务器",
+          command: "pnpm run dev",
+        },
+      },
+    ]);
+
+    await adapter.stop();
+  });
+
   test("extracts session id from execution info block", () => {
     const info = extractLatestExecutionInfo(`some text
 <Execution Info>
@@ -465,6 +529,37 @@ How can I assist you today?
 
     expect(events.at(-1)?.type).toBe("result");
     expect(events.at(-1)?.content).toBe("iflow 返回了会话元信息，但没有产出可转发的最终回复。");
+
+    await adapter.stop();
+  });
+
+  test("uses background command id as post-tool fallback when no final reply is produced", async () => {
+    const adapter = new IFlowAdapter(
+      {
+        workDir: "/Users/felixwang/Desktop/d-connect",
+      },
+      new Logger("error"),
+    );
+
+    const session = (await adapter.startSession("session-bg-command")) as any;
+    session.runSingleTurn = vi.fn(
+      async (_prompt: string, _continueConversation: boolean, turn: { awaitingPostToolResponse: boolean; lastToolResultToolName?: string; lastToolResultContent?: string }) => {
+        turn.awaitingPostToolResponse = true;
+        turn.lastToolResultToolName = "run_shell_command";
+        turn.lastToolResultContent = "Command running in background with ID: 36414";
+        return { code: 0, signal: null };
+      },
+    );
+
+    const events: Array<{ type?: string; content?: string }> = [];
+    session.on("event", (event: { type?: string; content?: string }) => {
+      events.push(event);
+    });
+
+    await session.send("start dev server");
+
+    expect(events.at(-1)?.type).toBe("result");
+    expect(events.at(-1)?.content).toBe("命令已在后台启动，任务 ID: 36414。");
 
     await adapter.stop();
   });

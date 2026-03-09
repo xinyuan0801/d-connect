@@ -131,6 +131,10 @@ describe("runtime response formatting", () => {
         requestId: "shell:0",
         toolName: "run_shell_command",
         toolInput: "echo hello",
+        toolInputRaw: {
+          description: "打印问候语",
+          command: "echo hello",
+        },
       },
       {
         type: "text",
@@ -144,7 +148,7 @@ describe("runtime response formatting", () => {
     ];
 
     expect(splitResponseMessages("正在处理命令执行结果。", events)).toEqual([
-      "🛠️ run_shell_command\n`echo hello`",
+      "🛠️ run_shell_command\n打印问候语\n`echo hello`",
       "正在处理命令执行结果。",
     ]);
   });
@@ -179,6 +183,24 @@ describe("runtime response formatting", () => {
 
     expect(splitResponseMessages("done", events)).toEqual([
       "🛠️ run_shell_command\n``printf '`hello`'``",
+    ]);
+  });
+
+  test("shows tool description before command when both are available", () => {
+    const events: AgentEvent[] = [
+      {
+        type: "tool_use",
+        toolName: "run_shell_command",
+        toolInput: "cd /Users/wxy/aha/lottery-app && pnpm run dev",
+        toolInputRaw: {
+          description: "启动开发服务器以验证 TypeScript 项目正常运行",
+          command: "cd /Users/wxy/aha/lottery-app && pnpm run dev",
+        },
+      },
+    ];
+
+    expect(splitResponseMessages("done", events)).toEqual([
+      "🛠️ run_shell_command\n启动开发服务器以验证 TypeScript 项目正常运行\n`cd /Users/wxy/aha/lottery-app && pnpm run dev`",
     ]);
   });
 });

@@ -514,7 +514,7 @@ describe("runtime integration", () => {
     expect(agent?.guardPrompts).toHaveLength(0);
     expect(agent?.conversationPrompts).toHaveLength(0);
     expect(platform?.replies).toHaveLength(1);
-    expect(platform?.replies[0]?.content).toContain("created session");
+    expect(platform?.replies[0]?.content).toContain("created and switched to session");
 
     await runtime.stop();
   });
