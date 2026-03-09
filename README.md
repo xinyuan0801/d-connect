@@ -65,7 +65,7 @@ npm install -g @xinyuan0801/d-connect
 d-connect init
 ```
 
-执行后会进入一个交互式 TUI 向导，用来填写项目名、Agent 类型、工作目录和平台凭证：
+执行后会进入一个交互式 TUI 向导，用来选择 Agent 类型、工作目录、`allowFrom` 访问范围（允许所有人或指定用户 ID）以及平台凭证：
 
 <img width="446" height="344" alt="init 配置 TUI" src="https://github.com/user-attachments/assets/f75348af-8869-480f-a78e-7d88b60b06c3" />
 
@@ -131,7 +131,7 @@ d-connect start
 | `agent.options.model` | Agent 使用的模型名；留空则走对应 CLI 默认值 |
 | `guard.enabled` | 是否启用项目级 Guard |
 | `guard.rules` | 自定义 Guard 规则，优先级高于默认规则 |
-| `platforms[].options.allowFrom` | 允许访问的用户 ID 列表；逗号分隔，`"*"` 表示全部允许 |
+| `platforms[].options.allowFrom` | 允许访问的用户 ID 列表；逗号分隔，`"*"` 表示全部允许；`init` 向导会显式询问此项 |
 
 ### 平台字段补充
 

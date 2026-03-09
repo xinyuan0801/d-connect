@@ -8,6 +8,7 @@ type WizardMode = "init" | "add";
 type HighlightedPart = { text: string; highlight: boolean };
 type OverviewTone = "normal" | "accent" | "muted" | "warning";
 type WorkDirMode = "current" | "custom";
+type AllowFromMode = "all" | "custom";
 type WizardLayout = "split" | "stacked";
 
 export interface RunConfigWizardOptions {
@@ -101,6 +102,22 @@ function asWorkDirMode(value: string | undefined): WorkDirMode {
   return "current";
 }
 
+function asAllowFromMode(value: string | undefined): AllowFromMode {
+  if (value === "all") {
+    return "all";
+  }
+  return "custom";
+}
+
+function defaultAllowFromMode(options: RunConfigWizardOptions): AllowFromMode {
+  const mode = options.mode ?? "init";
+  const allowFrom = options.defaults.allowFrom.trim();
+  if (allowFrom === "*" && mode !== "init") {
+    return "all";
+  }
+  return "custom";
+}
+
 function defaultAgentCommand(agentType: AgentType): string {
   if (agentType === "qoder") {
     return "qodercli";
@@ -181,7 +198,13 @@ export function stepMood(stepId: string): string {
     return "Agent 配置";
   }
 
-  if (stepId.startsWith("dingtalk") || stepId.startsWith("feishu") || stepId === "platformType" || stepId === "allowFrom") {
+  if (
+    stepId.startsWith("dingtalk") ||
+    stepId.startsWith("feishu") ||
+    stepId === "platformType" ||
+    stepId === "allowFromMode" ||
+    stepId === "allowFrom"
+  ) {
     return "平台接入";
   }
 
@@ -228,6 +251,9 @@ export function parseHighlightedText(input: string): HighlightedPart[] {
 function draftToAnswers(draft: WizardDraft, options: RunConfigWizardOptions): InitAnswers {
   const agentType = asAgentType(draft.agentType ?? options.defaults.agentType);
   const workDirMode = asWorkDirMode(draft.agentWorkDirMode);
+  const allowFromMode = asAllowFromMode(draft.allowFromMode ?? defaultAllowFromMode(options));
+  const defaultAllowFrom = options.defaults.allowFrom.trim();
+  const allowFromFallback = defaultAllowFrom === "*" ? "" : defaultAllowFrom;
   const agentWorkDir =
     workDirMode === "custom"
       ? (draft.agentWorkDir ?? options.defaults.agentWorkDir).trim()
@@ -243,7 +269,7 @@ function draftToAnswers(draft: WizardDraft, options: RunConfigWizardOptions): In
     agentWorkDir,
     agentModel: draft.agentModel ?? defaultAgentModel(agentType),
     platformType: "dingtalk",
-    allowFrom: (draft.allowFrom ?? options.defaults.allowFrom).trim(),
+    allowFrom: allowFromMode === "all" ? "*" : (draft.allowFrom ?? allowFromFallback).trim(),
     dingtalkClientId: (draft.dingtalkClientId ?? options.defaults.dingtalkClientId).trim(),
     dingtalkClientSecret: (draft.dingtalkClientSecret ?? options.defaults.dingtalkClientSecret).trim(),
     dingtalkProcessingNotice: (draft.dingtalkProcessingNotice ?? options.defaults.dingtalkProcessingNotice).trim(),
@@ -340,6 +366,11 @@ export function buildWizardOverview(draft: WizardDraft, options: RunConfigWizard
       label: "platform.type",
       value: answers.platformType,
     },
+    {
+      label: "platform.options.allowFrom",
+      value: answers.allowFrom.length > 0 ? answers.allowFrom : "待填写",
+      tone: answers.allowFrom.length > 0 ? "normal" : "warning",
+    },
   ];
 
   if (promptDingTalkCredentials) {
@@ -430,8 +461,8 @@ export function buildStepContext(stepId: string, draft: WizardDraft, options: Ru
       },
       {
         label: "platform.options.allowFrom",
-        value: answers.allowFrom,
-        tone: "muted",
+        value: answers.allowFrom.length > 0 ? answers.allowFrom : "待填写",
+        tone: answers.allowFrom.length > 0 ? "muted" : "warning",
       },
       {
         label: "platform.options.processingNotice",
@@ -467,6 +498,9 @@ export function buildWizardSteps(draft: WizardDraft, options: RunConfigWizardOpt
   const mode = options.mode ?? "init";
   const promptDingTalkCredentials = options.promptDingTalkCredentials ?? true;
   const workDirMode = asWorkDirMode(draft.agentWorkDirMode);
+  const allowFromMode = asAllowFromMode(draft.allowFromMode ?? defaultAllowFromMode(options));
+  const allowFromDefault = options.defaults.allowFrom.trim();
+  const allowFromInputDefault = allowFromDefault === "*" ? "" : allowFromDefault;
 
   const steps: WizardStep[] = [
     {
@@ -524,6 +558,45 @@ export function buildWizardSteps(draft: WizardDraft, options: RunConfigWizardOpt
       placeholder: "例如 ./backend 或 /path/to/repo",
       required: true,
       defaultValue: "",
+    });
+  }
+
+  steps.push({
+    id: "allowFromMode",
+    kind: "select",
+    title: "访问控制",
+    label: "谁可以访问这个机器人？",
+    hint: "建议按用户 ID 做白名单控制；只有在明确需要时再放开给所有人。",
+    details: [
+      "选择“允许所有人”会写入 allowFrom = \"*\"。",
+      "选择“仅允许指定用户”后，需要填写用户 ID 列表（逗号分隔）。",
+    ],
+    required: true,
+    defaultValue: defaultAllowFromMode(options),
+    options: [
+      {
+        label: "仅允许指定用户 ID",
+        value: "custom",
+        description: "更安全，推荐默认使用；例如：u123,u456。",
+      },
+      {
+        label: "允许所有人访问（*）",
+        value: "all",
+        description: "写入 allowFrom = \"*\"，任何用户都可触发机器人。",
+      },
+    ],
+  });
+
+  if (allowFromMode === "custom") {
+    steps.push({
+      id: "allowFrom",
+      kind: "text",
+      title: "访问控制",
+      label: "请输入允许访问的用户 ID（逗号分隔）",
+      hint: "支持一个或多个用户 ID；多个 ID 用英文逗号分隔。",
+      placeholder: "例如 user_a,user_b",
+      required: true,
+      defaultValue: allowFromInputDefault,
     });
   }
 

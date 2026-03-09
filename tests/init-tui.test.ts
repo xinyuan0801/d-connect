@@ -36,6 +36,7 @@ describe("init tui helpers", () => {
   test("stepMood maps wizard sections", () => {
     expect(stepMood("agentType")).toContain("Agent");
     expect(stepMood("agentWorkDir")).toContain("Agent");
+    expect(stepMood("allowFromMode")).toContain("平台");
     expect(stepMood("dingtalkClientId")).toContain("平台");
     expect(stepMood("confirm")).toContain("最终");
     expect(stepMood("logLevel")).toContain("运行时");
@@ -152,6 +153,8 @@ describe("init tui helpers", () => {
     expect(buildWizardSteps({}, options).map((step) => step.id)).toEqual([
       "agentType",
       "agentWorkDirMode",
+      "allowFromMode",
+      "allowFrom",
       "dingtalkClientId",
       "dingtalkClientSecret",
       "confirm",
@@ -174,6 +177,15 @@ describe("init tui helpers", () => {
     expect(clientIdStep?.defaultValue).toBe("");
     expect(clientIdStep?.placeholder).toBe("例如 dingxxxx");
 
+    const allowFromModeStep = buildWizardSteps({}, options).find((step) => step.id === "allowFromMode");
+    expect(allowFromModeStep?.title).toBe("访问控制");
+    expect(allowFromModeStep?.defaultValue).toBe("custom");
+    expect(allowFromModeStep?.options?.map((option) => option.value)).toEqual(["custom", "all"]);
+
+    const allowFromStep = buildWizardSteps({}, options).find((step) => step.id === "allowFrom");
+    expect(allowFromStep?.defaultValue).toBe("");
+    expect(allowFromStep?.placeholder).toBe("例如 user_a,user_b");
+
     const clientSecretStep = buildWizardSteps({}, options).find((step) => step.id === "dingtalkClientSecret");
     expect(clientSecretStep?.defaultValue).toBe("");
     expect(clientSecretStep?.placeholder).toBe("请输入 client secret");
@@ -195,6 +207,8 @@ describe("init tui helpers", () => {
       "agentType",
       "agentWorkDirMode",
       "agentWorkDir",
+      "allowFromMode",
+      "allowFrom",
       "dingtalkClientId",
       "dingtalkClientSecret",
       "confirm",
@@ -223,9 +237,32 @@ describe("init tui helpers", () => {
     expect(buildWizardSteps({}, options).map((step) => step.id)).toEqual([
       "agentType",
       "agentWorkDirMode",
+      "allowFromMode",
       "confirm",
     ]);
 
     expect(buildWizardOverview({}, options).some((item) => item.label === "platform.options.credentials")).toBe(true);
+  });
+
+  test("buildWizardSteps skips allowFrom input when allow all is selected", () => {
+    const defaults = defaultInitAnswers({ cwd: "/repo/workdir" });
+    const options = {
+      defaults,
+      configPath: "/repo/config.json",
+      overwritten: false,
+      stdin: process.stdin,
+      stdout: process.stdout,
+      deriveProjectName: (workDir: string, fallback?: string) => fallback ?? workDir,
+    };
+
+    const steps = buildWizardSteps({ allowFromMode: "all" }, options);
+    expect(steps.map((step) => step.id)).toEqual([
+      "agentType",
+      "agentWorkDirMode",
+      "allowFromMode",
+      "dingtalkClientId",
+      "dingtalkClientSecret",
+      "confirm",
+    ]);
   });
 });
