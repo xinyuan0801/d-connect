@@ -152,6 +152,7 @@ d-connect start
 | `/new [name]` | 新建逻辑 session |
 | `/list` | 列出当前聊天对象下的 session |
 | `/switch <id|name>` | 切换到指定 session |
+| `/stop` | 停止当前活跃 session 对应的 Agent 进程 |
 | `/loop <request>` | 用自然语言描述定时任务 |
 | `/loop list` | 列出当前聊天对象下的 loop |
 | `/loop add <expr> <prompt>` | 直接创建 loop |
@@ -164,6 +165,7 @@ d-connect start
 | `d-connect init` | 创建配置文件 |
 | `d-connect add` | 给现有配置追加一个项目 |
 | `d-connect start` | 启动本地守护进程 |
+| `d-connect restart` | 重启本地守护进程 |
 | `d-connect send -p <project> -s <sessionKey> "hello"` | 从本地直接向某个会话发送消息 |
 | `d-connect loop add -p <project> -s <sessionKey> -e "*/30 * * * * *" "status"` | 添加 loop |
 | `d-connect loop list -p <project>` | 查看项目下的 loop |
@@ -269,6 +271,11 @@ pnpm run build
 
 - 同一逻辑 session 正在处理上一条请求
 - 等处理完成，或先 `/new` 新开一个 session
+
+### `qoder` 调用 `AskUserQuestion` 后看起来停住
+
+- `d-connect` 会在检测到 `AskUserQuestion` 工具调用后结束当前这一轮，避免 CLI 一直阻塞
+- 聊天窗口会收到问题摘要，直接回复你的选择（例如 `dev` / `prod`）即可继续同一 `session`
 
 ### IPC 无法连接
 

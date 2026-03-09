@@ -102,7 +102,7 @@ export class CommandService {
   ) {}
 
   async handle(context: CommandContext): Promise<CommandResult> {
-    const { project, sessionKey, session, raw } = context;
+    const { runtime, project, sessionKey, session, raw } = context;
     const parts = raw.trim().slice(1).split(/\s+/);
     const command = (parts[0] ?? "").toLowerCase();
 
@@ -114,6 +114,7 @@ export class CommandService {
           "/new [name]",
           "/list",
           "/switch <id|name>",
+          "/stop",
           "/loop <request>",
           "/loop list",
           "/loop add <expr> <prompt>",
@@ -151,6 +152,22 @@ export class CommandService {
         }
         await this.conversations.save();
         return handled(`active session: ${found.id} (${found.name})`);
+      }
+
+      case "stop": {
+        const runningSession = runtime.sessions.get(session.id);
+        if (!runningSession || !runningSession.isAlive()) {
+          runtime.sessions.delete(session.id);
+          this.conversations.clearAgentSession(session);
+          await this.conversations.save();
+          return handled(`session already stopped: ${session.id}`);
+        }
+
+        await runningSession.close();
+        runtime.sessions.delete(session.id);
+        this.conversations.clearAgentSession(session);
+        await this.conversations.save();
+        return handled(`stopped session ${session.id}`);
       }
 
       case "loop": {

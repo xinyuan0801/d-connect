@@ -70,6 +70,18 @@ describe("base cli session", () => {
     await first;
   });
 
+  test("does not reject when close interrupts a running child", async () => {
+    const session = new TestCliSession(
+      'console.log("text:started"); process.on("SIGTERM", () => process.exit(143)); setInterval(() => {}, 1000);',
+    );
+
+    const sending = session.send("ignored");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await session.close();
+
+    await expect(sending).resolves.toBeUndefined();
+  });
+
   test("keeps PWD aligned with invocation cwd", async () => {
     const workDir = await mkdtemp(join(tmpdir(), "d-connect-cwd-"));
     const session = new TestCliSession(

@@ -1,6 +1,6 @@
 import { request } from "node:http";
 import type { LoopJob } from "../runtime/types.js";
-import type { LoopListResponse, IpcResult, SendResponse } from "./types.js";
+import type { DaemonStopResponse, LoopListResponse, IpcResult, SendResponse } from "./types.js";
 
 async function requestIpc<T>(socketPath: string, method: string, path: string, body?: unknown): Promise<T> {
   const payload = body ? JSON.stringify(body) : "";
@@ -62,4 +62,8 @@ export async function ipcLoopList(socketPath: string, project?: string): Promise
 
 export async function ipcLoopDel(socketPath: string, id: string): Promise<{ deleted: boolean; id: string }> {
   return requestIpc<{ deleted: boolean; id: string }>(socketPath, "POST", "/loop/del", { id });
+}
+
+export async function ipcDaemonStop(socketPath: string): Promise<DaemonStopResponse> {
+  return requestIpc<DaemonStopResponse>(socketPath, "POST", "/daemon/stop");
 }

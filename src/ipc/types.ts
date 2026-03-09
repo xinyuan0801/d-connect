@@ -42,3 +42,7 @@ export interface SendResponse {
 export interface LoopListResponse {
   jobs: LoopJob[];
 }
+
+export interface DaemonStopResponse {
+  stopping: boolean;
+}

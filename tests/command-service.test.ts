@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -7,7 +8,7 @@ import { createSessionStore } from "../src/runtime/session-store.js";
 import { createLoopStore, LoopScheduler } from "../src/scheduler/loop.js";
 import { ConversationService } from "../src/services/conversation-service.js";
 import { CommandService, type CommandResult } from "../src/services/command-service.js";
-import type { AgentAdapter, AgentSession } from "../src/runtime/types.js";
+import type { AgentAdapter, AgentSession, PermissionResult } from "../src/runtime/types.js";
 import type { ProjectRuntime } from "../src/services/project-registry.js";
 
 class FakeAgent implements AgentAdapter {
@@ -19,6 +20,66 @@ class FakeAgent implements AgentAdapter {
 
   async stop(): Promise<void> {
     // noop
+  }
+}
+
+class MockRuntimeSession extends EventEmitter implements AgentSession {
+  private closed = false;
+  public closeCalls = 0;
+
+  async send(_prompt: string): Promise<void> {
+    throw new Error("not used");
+  }
+
+  async respondPermission(_requestId: string, _result: PermissionResult): Promise<void> {
+    // noop
+  }
+
+  currentSessionId(): string {
+    return "mock-agent-session";
+  }
+
+  isAlive(): boolean {
+    return !this.closed;
+  }
+
+  async close(): Promise<void> {
+    this.closed = true;
+    this.closeCalls += 1;
+    this.emit("close");
+  }
+}
+
+class MockSlowRuntimeSession extends EventEmitter implements AgentSession {
+  private closed = false;
+  public closeCalls = 0;
+
+  async send(_prompt: string): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    this.emit("event", {
+      type: "result",
+      content: "slow-result",
+      sessionId: "slow-session-id",
+      done: true,
+    });
+  }
+
+  async respondPermission(_requestId: string, _result: PermissionResult): Promise<void> {
+    // noop
+  }
+
+  currentSessionId(): string {
+    return "slow-session-id";
+  }
+
+  isAlive(): boolean {
+    return !this.closed;
+  }
+
+  async close(): Promise<void> {
+    this.closed = true;
+    this.closeCalls += 1;
+    this.emit("close");
   }
 }
 
@@ -108,6 +169,15 @@ describe("command service", () => {
         raw: "/help",
       })),
     ).not.toContain("/mode");
+    expect(
+      expectHandled(await service.handle({
+        runtime,
+        project: "demo",
+        sessionKey: "local:alice",
+        session,
+        raw: "/help",
+      })),
+    ).toContain("/stop");
 
     expect(
       expectHandled(await service.handle({
@@ -118,6 +188,70 @@ describe("command service", () => {
         raw: "/mode",
       })),
     ).toBe("unknown command: mode. use /help");
+  });
+
+  test("handles /stop by closing runtime session and clearing agent session id", async () => {
+    const { service, conversation, runtime } = await createHarness();
+    const session = conversation.getOrCreateActiveSession("demo", "local:alice");
+    session.agentSessionId = "resume-123";
+
+    const runtimeSession = new MockRuntimeSession();
+    runtime.sessions.set(session.id, runtimeSession);
+
+    const stopped = expectHandled(await service.handle({
+      runtime,
+      project: "demo",
+      sessionKey: "local:alice",
+      session,
+      raw: "/stop",
+    }));
+    expect(stopped).toBe(`stopped session ${session.id}`);
+    expect(runtimeSession.closeCalls).toBe(1);
+    expect(runtime.sessions.has(session.id)).toBe(false);
+    expect(session.agentSessionId).toBe("");
+
+    const stoppedAgain = expectHandled(await service.handle({
+      runtime,
+      project: "demo",
+      sessionKey: "local:alice",
+      session,
+      raw: "/stop",
+    }));
+    expect(stoppedAgain).toBe(`session already stopped: ${session.id}`);
+  });
+
+  test("keeps agent session id cleared when /stop races with an in-flight turn", async () => {
+    const { service, conversation, runtime } = await createHarness();
+    const session = conversation.getOrCreateActiveSession("demo", "local:alice");
+
+    const runtimeSession = new MockSlowRuntimeSession();
+    runtime.sessions.set(session.id, runtimeSession);
+
+    const turn = conversation.runTurn(runtime, "demo", "local:alice", session, "hello");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    const stopped = expectHandled(await service.handle({
+      runtime,
+      project: "demo",
+      sessionKey: "local:alice",
+      session,
+      raw: "/stop",
+    }));
+    expect(stopped).toBe(`stopped session ${session.id}`);
+
+    await expect(turn).resolves.toEqual({
+      response: "slow-result",
+      events: expect.arrayContaining([
+        expect.objectContaining({
+          type: "result",
+          content: "slow-result",
+          sessionId: "slow-session-id",
+        }),
+      ]),
+    });
+    expect(runtimeSession.closeCalls).toBe(1);
+    expect(runtime.sessions.has(session.id)).toBe(false);
+    expect(session.agentSessionId).toBe("");
   });
 
   test("handles loop add/list/del through command registry", async () => {

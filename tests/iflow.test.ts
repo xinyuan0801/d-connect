@@ -9,6 +9,7 @@ import {
   recordAssistantTools,
   recordToolResults,
   readTranscriptDelta,
+  shouldRetryPostToolInSession,
   shouldFinishByIdleState,
   shouldFinishByNoResultState,
   type IFlowPendingToolState,
@@ -99,6 +100,19 @@ describe("iflow pending tool tracking", () => {
     expect(adapter.getMode()).toBe("yolo");
   });
 
+  test("buildIFlowArgs uses -p prompt flag instead of legacy -i", () => {
+    const adapter = createIFlowAdapter(
+      {
+        workDir: "/Users/felixwang/Desktop/d-connect",
+      },
+      new Logger("error"),
+    );
+
+    const args = adapter.buildIFlowArgs("hello", false);
+    expect(args).toContain("-p");
+    expect(args).not.toContain("-i");
+  });
+
   test("byte offsets still capture new transcript content after multibyte text", () => {
     const first = Buffer.from('{"text":"杭州今天天气如何"}\n', "utf8");
     const second = Buffer.from('{"text":"你刚才问的是杭州今天天气如何"}\n', "utf8");
@@ -180,11 +194,53 @@ describe("iflow pending tool tracking", () => {
         pendingTools: new Map(),
         hadToolActivity: false,
         awaitingPostToolResponse: false,
-        startedAt: Date.now() - 31000,
+        startedAt: Date.now() - 61000,
       }),
     ).toBe(true);
 
     vi.useRealTimers();
+  });
+
+  test("post-tool fallback retry requires session id and no pending tools", () => {
+    expect(
+      shouldRetryPostToolInSession({
+        awaitingPostToolResponse: true,
+        pendingTools: new Map(),
+        sessionId: "session-1",
+        retryCount: 0,
+        maxRetryCount: 1,
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldRetryPostToolInSession({
+        awaitingPostToolResponse: true,
+        pendingTools: new Map([["tool-1", "run_shell_command"]]),
+        sessionId: "session-1",
+        retryCount: 0,
+        maxRetryCount: 1,
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldRetryPostToolInSession({
+        awaitingPostToolResponse: true,
+        pendingTools: new Map(),
+        sessionId: "",
+        retryCount: 0,
+        maxRetryCount: 1,
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldRetryPostToolInSession({
+        awaitingPostToolResponse: true,
+        pendingTools: new Map(),
+        sessionId: "session-1",
+        retryCount: 1,
+        maxRetryCount: 1,
+      }),
+    ).toBe(false);
   });
 
   test("preserves assistant content order between text and tool_use", () => {
@@ -216,8 +272,8 @@ describe("iflow pending tool tracking", () => {
     const turn = {
       resultChunks: ["我来帮你创建这个定时任务。"],
       pendingTools: new Map([["run_shell_command:0", "run_shell_command"]]),
-      pendingStartedAt: Date.now() - 46000,
-      pendingTimeoutMs: 45000,
+      pendingStartedAt: Date.now() - 61000,
+      pendingTimeoutMs: 60000,
       lastTextAt: 0,
     };
 
@@ -228,11 +284,35 @@ describe("iflow pending tool tracking", () => {
     expect(warnSpy).toHaveBeenCalledWith("iflow tool execution timed out", {
       sessionId: "session-timeout",
       pendingTools: ["run_shell_command"],
-      timeoutMs: 45000,
+      timeoutMs: 60000,
       mode: "yolo",
     });
 
     await adapter.stop();
     vi.useRealTimers();
+  });
+
+  test("close kills active iflow child process", async () => {
+    const adapter = new IFlowAdapter(
+      {
+        workDir: "/Users/felixwang/Desktop/d-connect",
+      },
+      new Logger("error"),
+    );
+
+    const session = (await adapter.startSession("session-close")) as any;
+    const fakeChild = {
+      killed: false,
+      kill: vi.fn((signal: NodeJS.Signals) => {
+        fakeChild.killed = true;
+        return signal === "SIGTERM";
+      }),
+    };
+    session.child = fakeChild;
+
+    await session.close();
+    expect(fakeChild.kill).toHaveBeenCalledWith("SIGTERM");
+
+    await adapter.stop();
   });
 });

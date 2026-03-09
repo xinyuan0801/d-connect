@@ -26,10 +26,13 @@ import {
 const TRANSCRIPT_POLL_MS = 200;
 const TURN_IDLE_MS = 900;
 const TURN_IDLE_AFTER_TOOL_MS = 5000;
-const TURN_POST_TOOL_RESPONSE_TIMEOUT_MS = 30000;
-const PENDING_TOOL_TIMEOUT_MS = 45000;
+const TURN_POST_TOOL_RESPONSE_TIMEOUT_MS = 60000;
+const PENDING_TOOL_TIMEOUT_MS = 60000;
 const TURN_HARD_TIMEOUT_MS = 120000;
-const TURN_NO_RESULT_TIMEOUT_MS = 30000;
+const TURN_NO_RESULT_TIMEOUT_MS = 60000;
+const POST_TOOL_SESSION_RETRY_MAX = 1;
+const POST_TOOL_SESSION_RETRY_PROMPT =
+  "Continue from the latest tool results and provide the final user-facing reply now. Do not ask follow-up questions.";
 
 interface TranscriptLine {
   sessionId?: string;
@@ -180,59 +183,31 @@ export function shouldFinishByNoResultState(
   return now - state.startedAt >= TURN_NO_RESULT_TIMEOUT_MS;
 }
 
+export function shouldRetryPostToolInSession(state: {
+  awaitingPostToolResponse: boolean;
+  pendingTools: Map<string, string>;
+  sessionId: string;
+  retryCount: number;
+  maxRetryCount: number;
+}): boolean {
+  if (!state.awaitingPostToolResponse) {
+    return false;
+  }
+  if (state.pendingTools.size > 0) {
+    return false;
+  }
+  if (state.sessionId.length === 0) {
+    return false;
+  }
+  return state.retryCount < state.maxRetryCount;
+}
+
 function safeJsonParse<T>(line: string): T | null {
   try {
     return JSON.parse(line) as T;
   } catch {
     return null;
   }
-}
-
-function shellQuote(input: string): string {
-  return `'${input.replace(/'/g, `'"'"'`)}'`;
-}
-
-function resolveScriptCommand(pathEnv = process.env.PATH): string | undefined {
-  const commonBins = ["/usr/bin/script", "/bin/script", "/usr/local/bin/script"];
-  for (const candidate of commonBins) {
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-  }
-
-  const fallbackPaths = (pathEnv || "")
-    .split(":")
-    .filter(Boolean)
-    .concat("/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin")
-    .map((dir) => join(dir, "script"));
-  for (const candidate of fallbackPaths) {
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-  }
-
-  return undefined;
-}
-
-function buildPtyWrapper(cmd: string, args: string[]): { command: string; args: string[] } {
-  const scriptCommand = resolveScriptCommand();
-
-  if (process.platform === "linux" && scriptCommand) {
-    const commandString = [cmd, ...args].map(shellQuote).join(" ");
-    return {
-      command: scriptCommand,
-      args: ["-q", "-e", "-c", commandString, "/dev/null"],
-    };
-  }
-
-  if (process.platform === "darwin" && scriptCommand) {
-    return {
-      command: scriptCommand,
-      args: ["-q", "/dev/null", cmd, ...args],
-    };
-  }
-
-  return { command: cmd, args };
 }
 
 async function fileSize(path: string): Promise<number> {
@@ -285,6 +260,7 @@ class IFlowSession extends EventEmitter implements AgentSession {
   private alive = true;
   private busy = false;
   private sentOnce = false;
+  private child?: ReturnType<typeof spawn>;
 
   constructor(private readonly adapter: IFlowAdapter, sessionId?: string) {
     super();
@@ -534,6 +510,48 @@ class IFlowSession extends EventEmitter implements AgentSession {
     return outcome[1];
   }
 
+  private async runSingleTurn(
+    prompt: string,
+    continueConversation: boolean,
+    turn: TurnState,
+    tails: { stdout: string; stderr: string },
+  ): Promise<SpawnResult> {
+    const iflowArgs = this.adapter.buildIFlowArgs(prompt, continueConversation, this.agentSessionId);
+    this.adapter.logger.debug("spawn iflow turn", {
+      command: this.adapter.command,
+      args: iflowArgs,
+    });
+
+    const child = spawn(this.adapter.command, iflowArgs, {
+      cwd: this.adapter.workDir,
+      env: this.adapter.spawnEnv(),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    this.child = child;
+    const spawnError = new Promise<never>((_, reject) => {
+      child.once("error", (error) => {
+        reject(new Error(`failed to spawn iflow process: ${error.message}`));
+      });
+    });
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      tails.stdout = appendLimited(tails.stdout, chunk.toString("utf8"));
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      tails.stderr = appendLimited(tails.stderr, chunk.toString("utf8"));
+    });
+
+    try {
+      const result = await Promise.race([this.waitForTurnResult(child, turn), spawnError]);
+      await this.loadNewTranscript(turn);
+      return result;
+    } finally {
+      if (this.child === child) {
+        this.child = undefined;
+      }
+    }
+  }
+
   async send(prompt: string): Promise<void> {
     if (!this.alive) {
       throw new Error("agent session is closed");
@@ -544,17 +562,9 @@ class IFlowSession extends EventEmitter implements AgentSession {
 
     this.busy = true;
 
-    let stdoutTail = "";
-    let stderrTail = "";
+    const tails = { stdout: "", stderr: "" };
 
     try {
-      const iflowArgs = this.adapter.buildIFlowArgs(prompt, this.sentOnce, this.agentSessionId);
-      const wrapped = buildPtyWrapper(this.adapter.command, iflowArgs);
-      this.adapter.logger.debug("spawn iflow turn", {
-        command: wrapped.command,
-        args: wrapped.args,
-      });
-
       const turn: TurnState = {
         transcriptPath: this.agentSessionId ? join(this.adapter.sessionDir, `${this.agentSessionId}.jsonl`) : undefined,
         offset: 0,
@@ -577,26 +587,34 @@ class IFlowSession extends EventEmitter implements AgentSession {
         turn.offset = await fileSize(turn.transcriptPath);
       }
 
-      const child = spawn(wrapped.command, wrapped.args, {
-        cwd: this.adapter.workDir,
-        env: this.adapter.spawnEnv(),
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      const spawnError = new Promise<never>((_, reject) => {
-        child.once("error", (error) => {
-          reject(new Error(`failed to spawn iflow process: ${error.message}`));
+      let result = await this.runSingleTurn(prompt, this.sentOnce, turn, tails);
+
+      let retryCount = 0;
+      while (
+        shouldRetryPostToolInSession({
+          awaitingPostToolResponse: turn.awaitingPostToolResponse,
+          pendingTools: turn.pendingTools,
+          sessionId: this.currentSessionId(),
+          retryCount,
+          maxRetryCount: POST_TOOL_SESSION_RETRY_MAX,
+        })
+      ) {
+        retryCount += 1;
+        this.adapter.logger.warn("iflow turn ended after tool without final text, retrying in-session", {
+          sessionId: this.currentSessionId(),
+          retryCount,
+          maxRetryCount: POST_TOOL_SESSION_RETRY_MAX,
         });
-      });
 
-      child.stdout.on("data", (chunk: Buffer) => {
-        stdoutTail = appendLimited(stdoutTail, chunk.toString("utf8"));
-      });
-      child.stderr.on("data", (chunk: Buffer) => {
-        stderrTail = appendLimited(stderrTail, chunk.toString("utf8"));
-      });
+        turn.startedAt = Date.now();
+        turn.lastActivityAt = turn.startedAt;
+        turn.lastToolActivityAt = turn.startedAt;
+        if (turn.pendingTools.size > 0) {
+          turn.pendingStartedAt = turn.startedAt;
+        }
 
-      const result = await Promise.race([this.waitForTurnResult(child, turn), spawnError]);
-      await this.loadNewTranscript(turn);
+        result = await this.runSingleTurn(POST_TOOL_SESSION_RETRY_PROMPT, true, turn, tails);
+      }
 
       if (turn.awaitingPostToolResponse) {
         turn.resultChunks.push("iflow 在工具执行后结束了当前轮次，但没有产出最终回复；已保留底层续聊状态。");
@@ -615,13 +633,13 @@ class IFlowSession extends EventEmitter implements AgentSession {
       }
 
       if (result.code && result.code !== 0) {
-        const details = normalizeWhitespace(`${stderrTail}\n${stdoutTail}`) || "no output";
+        const details = normalizeWhitespace(`${tails.stderr}\n${tails.stdout}`) || "no output";
         const err = `iflow turn failed (${result.code}): ${details}`;
         this.emitAgentEvent({ type: "error", content: err, done: true });
         throw new Error(err);
       }
 
-      const fallback = normalizeWhitespace(`${stdoutTail}\n${stderrTail}`);
+      const fallback = normalizeWhitespace(`${tails.stdout}\n${tails.stderr}`);
       if (fallback.length > 0) {
         this.emitAgentEvent({
           type: "result",
@@ -639,6 +657,10 @@ class IFlowSession extends EventEmitter implements AgentSession {
 
   async close(): Promise<void> {
     this.alive = false;
+    if (this.child && !this.child.killed) {
+      this.child.kill("SIGTERM");
+    }
+    this.child = undefined;
     this.removeAllListeners();
   }
 }
@@ -695,7 +717,7 @@ export class IFlowAdapter implements AgentAdapter, ModelSwitchable {
       args.push("-c");
     }
 
-    args.push("-i", prompt);
+    args.push("-p", prompt);
     return args;
   }
 

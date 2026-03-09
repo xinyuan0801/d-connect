@@ -33,6 +33,7 @@ export abstract class BaseCliSession extends EventEmitter implements AgentSessio
   protected child?: ChildProcessWithoutNullStreams;
   protected alive = true;
   protected sending = false;
+  protected interrupted = false;
 
   constructor(protected readonly logger: Logger, sessionId?: string) {
     super();
@@ -146,6 +147,10 @@ export abstract class BaseCliSession extends EventEmitter implements AgentSessio
       });
     });
 
+    if (this.interrupted) {
+      return;
+    }
+
     if (exitCode && exitCode !== 0) {
       const fullTranscript = `${stdoutBuffer}\n${stderrBuffer}`.trim();
       const details = fullTranscript.length > 0 ? fullTranscript.slice(0, 4000) : "no output";
@@ -162,6 +167,7 @@ export abstract class BaseCliSession extends EventEmitter implements AgentSessio
     }
 
     this.sending = true;
+    this.interrupted = false;
     try {
       await this.runOnce(prompt, this.currentId);
     } finally {
@@ -173,6 +179,7 @@ export abstract class BaseCliSession extends EventEmitter implements AgentSessio
   async close(): Promise<void> {
     this.alive = false;
     if (this.child && !this.child.killed) {
+      this.interrupted = true;
       this.child.kill("SIGTERM");
     }
     this.child = undefined;

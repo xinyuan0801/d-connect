@@ -64,12 +64,82 @@ function parseToolInputRaw(value: unknown): RawRecord | undefined {
   return asRecord(value) ?? parseRecordString(value);
 }
 
-function summarizeToolInput(input: unknown): string | undefined {
+function normalizeToolName(value: string | undefined): string {
+  return (value ?? "").replace(/[^a-z]/gi, "").toLowerCase();
+}
+
+function isAskUserQuestionTool(toolName: string | undefined): boolean {
+  return normalizeToolName(toolName) === "askuserquestion";
+}
+
+function summarizeAskUserQuestionInput(input: unknown): string | undefined {
+  const payload = parseToolInputRaw(input);
+  if (!payload) {
+    return undefined;
+  }
+
+  const questions = Array.isArray(payload.questions) ? payload.questions : [];
+  if (questions.length === 0) {
+    return undefined;
+  }
+
+  const summaries: string[] = [];
+  for (const entry of questions) {
+    const question = asRecord(entry);
+    if (!question) {
+      continue;
+    }
+
+    const header = pickString(question, ["header", "title"]);
+    const text = pickString(question, ["question", "text", "prompt"]);
+    let summary = "";
+    if (header && text) {
+      summary = `${header}: ${text}`;
+    } else {
+      summary = text ?? header ?? "";
+    }
+    if (!summary) {
+      continue;
+    }
+
+    const options = Array.isArray(question.options)
+      ? question.options
+          .map((option) => {
+            const optionRecord = asRecord(option);
+            if (!optionRecord) {
+              return "";
+            }
+            return pickString(optionRecord, ["label", "value", "name"]) ?? "";
+          })
+          .filter((label) => label.length > 0)
+      : [];
+    if (options.length > 0) {
+      summary = `${summary} (options: ${options.join(" / ")})`;
+    }
+    summaries.push(summary);
+  }
+
+  if (summaries.length === 0) {
+    return undefined;
+  }
+
+  const text = summaries.join(" | ");
+  return text.length > 512 ? `${text.slice(0, 512)}...` : text;
+}
+
+function summarizeToolInput(toolName: string, input: unknown): string | undefined {
+  if (isAskUserQuestionTool(toolName)) {
+    const questionSummary = summarizeAskUserQuestionInput(input);
+    if (questionSummary) {
+      return questionSummary;
+    }
+  }
+
   if (typeof input === "string" && input.trim().length > 0) {
     return input;
   }
 
-  const payload = asRecord(input);
+  const payload = parseToolInputRaw(input);
   if (!payload) {
     return undefined;
   }
@@ -163,13 +233,14 @@ function parseContentBlocks(content: unknown, includeToolResults = false): Parse
     if (type === "tool_use" || type === "tool-call" || type === "tool_call" || type === "function") {
       const toolId = pickString(item, ["id", "tool_use_id", "toolUseId"]) ?? `${index}`;
       const toolName = pickString(item, ["name", "tool_name", "toolName"]) ?? "unknown";
+      const toolInputRaw = parseToolInputRaw(item.input);
       events.push({
         dedupeKey: `tool:${toolId}`,
         event: {
           type: "tool_use",
           toolName,
-          toolInput: summarizeToolInput(item.input),
-          toolInputRaw: parseToolInputRaw(item.input),
+          toolInput: summarizeToolInput(toolName, item.input),
+          toolInputRaw,
         },
       });
       continue;
@@ -312,6 +383,7 @@ function parseQoderOutput(line: string): QoderParseOutcome {
 class QoderSession extends BaseCliSession implements AgentSession {
   private readonly messageState = new Map<string, string>();
   private readonly transientKeys = new Set<string>();
+  private endingForAskUserQuestion = false;
 
   constructor(
     logger: Logger,
@@ -424,7 +496,20 @@ class QoderSession extends BaseCliSession implements AgentSession {
       line: previewText(line, 1000),
     });
     const outcome = parseQoderOutput(line);
-    return this.dedupeEvents(outcome.events, outcome.messageId, this.messageState, this.transientKeys);
+    const events = this.dedupeEvents(outcome.events, outcome.messageId, this.messageState, this.transientKeys);
+    if (
+      !this.endingForAskUserQuestion &&
+      events.some((event) => event.type === "tool_use" && isAskUserQuestionTool(event.toolName))
+    ) {
+      this.endingForAskUserQuestion = true;
+      this.logger.info("qoder ask user question detected; stopping current run for external reply", {
+        sessionId: this.currentId,
+      });
+      if (this.child && !this.child.killed) {
+        this.child.kill("SIGKILL");
+      }
+    }
+    return events;
   }
 
   protected emitEvents(events: AgentEvent[], transcript: { value: string }, sawResult: { value: boolean }): void {
@@ -445,6 +530,7 @@ class QoderSession extends BaseCliSession implements AgentSession {
     this.sending = true;
 
     try {
+      this.endingForAskUserQuestion = false;
       this.messageState.clear();
       this.transientKeys.clear();
       try {

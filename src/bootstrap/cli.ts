@@ -1,7 +1,9 @@
 import { join } from "node:path";
+import { execFile } from "node:child_process";
 import { Command } from "commander";
 import { addProjectConfig, initConfig, resolveConfigPathByProject } from "../config/index.js";
-import { ipcLoopAdd, ipcLoopDel, ipcLoopList, ipcSend } from "../ipc/client.js";
+import { ipcDaemonStop, ipcLoopAdd, ipcLoopDel, ipcLoopList, ipcSend } from "../ipc/client.js";
+import { ensureSocketAvailable } from "../ipc/server.js";
 import { resolveAndLoadConfig, startDaemon } from "./daemon.js";
 
 function formatConfigCandidates(paths: string[]): string {
@@ -31,6 +33,84 @@ function printError(error: unknown): void {
   console.error(message);
 }
 
+function isIpcUnavailableError(error: unknown): boolean {
+  if (typeof error === "object" && error && "code" in error) {
+    const code = (error as { code?: unknown }).code;
+    if (code === "ENOENT" || code === "ECONNREFUSED") {
+      return true;
+    }
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("ENOENT") || message.includes("ECONNREFUSED");
+}
+
+function isDaemonStopUnsupportedError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("route not found: POST /daemon/stop") || message.includes("daemon stop is not enabled");
+}
+
+async function listSocketOwnerPids(socketPath: string): Promise<number[]> {
+  return new Promise<number[]>((resolve, reject) => {
+    execFile("lsof", ["-t", socketPath], (error, stdout) => {
+      if (error) {
+        const code = (error as NodeJS.ErrnoException | { code?: unknown }).code;
+        if (code === 1) {
+          resolve([]);
+          return;
+        }
+        if (code === "ENOENT") {
+          reject(new Error("daemon stop fallback requires lsof, but it was not found"));
+          return;
+        }
+        reject(error);
+        return;
+      }
+
+      const pids = String(stdout)
+        .split(/\s+/)
+        .map((value) => Number.parseInt(value, 10))
+        .filter((value) => Number.isInteger(value) && value > 0);
+      resolve(Array.from(new Set(pids)));
+    });
+  });
+}
+
+async function stopLegacyDaemonBySocketOwner(socketPath: string): Promise<boolean> {
+  const pids = await listSocketOwnerPids(socketPath);
+  let signaled = false;
+  for (const pid of pids) {
+    try {
+      process.kill(pid, "SIGTERM");
+      signaled = true;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException | { code?: unknown }).code;
+      if (code !== "ESRCH") {
+        throw error;
+      }
+    }
+  }
+  return signaled;
+}
+
+async function waitUntilSocketCanStart(socketPath: string, timeoutMs = 10_000): Promise<void> {
+  const startedAt = Date.now();
+  while (true) {
+    try {
+      await ensureSocketAvailable(socketPath);
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!message.includes("ipc server already running")) {
+        throw error;
+      }
+      if (Date.now() - startedAt >= timeoutMs) {
+        throw new Error(`daemon stop timed out after ${timeoutMs}ms`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+  }
+}
+
 export function createCliProgram(): Command {
   const program = new Command();
   program
@@ -43,6 +123,36 @@ export function createCliProgram(): Command {
     .description("Start daemon")
     .option("-c, --config <path>", "Path to config.json")
     .action(async (opts: { config?: string }) => {
+      await startDaemon({ explicitConfigPath: opts.config });
+    });
+
+  program
+    .command("restart")
+    .description("Restart daemon")
+    .option("-c, --config <path>", "Path to config.json")
+    .action(async (opts: { config?: string }) => {
+      const socketPath = await resolveSocketPath({ configPath: opts.config });
+      let stopRequested = false;
+      try {
+        await ipcDaemonStop(socketPath);
+        stopRequested = true;
+      } catch (error) {
+        if (isDaemonStopUnsupportedError(error)) {
+          stopRequested = await stopLegacyDaemonBySocketOwner(socketPath);
+          if (!stopRequested) {
+            throw new Error(
+              "daemon stop endpoint is unavailable and no daemon process owns the ipc socket; stop it manually and retry",
+            );
+          }
+        } else if (!isIpcUnavailableError(error)) {
+          throw error;
+        }
+      }
+
+      if (stopRequested) {
+        await waitUntilSocketCanStart(socketPath);
+      }
+
       await startDaemon({ explicitConfigPath: opts.config });
     });
 

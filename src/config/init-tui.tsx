@@ -8,6 +8,7 @@ type WizardMode = "init" | "add";
 type HighlightedPart = { text: string; highlight: boolean };
 type OverviewTone = "normal" | "accent" | "muted" | "warning";
 type WorkDirMode = "current" | "custom";
+type WizardLayout = "split" | "stacked";
 
 export interface RunConfigWizardOptions {
   defaults: InitAnswers;

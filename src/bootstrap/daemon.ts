@@ -46,11 +46,13 @@ export async function startDaemon(options: StartAppOptions = {}): Promise<void> 
   const runtime = new RuntimeEngine(config, logger.child("runtime"), loopScheduler, {
     configPath,
   });
+  let requestStop = (_signal: string): void => {};
   const ipcServer = new IpcServer({
     socketPath: join(config.dataDir, "ipc.sock"),
     runtime,
     loop: loopScheduler,
     logger: logger.child("ipc"),
+    requestStop: (signal) => requestStop(signal),
   });
 
   await ensureSocketAvailable(join(config.dataDir, "ipc.sock"));
@@ -80,11 +82,15 @@ export async function startDaemon(options: StartAppOptions = {}): Promise<void> 
     }
   };
 
+  requestStop = (signal) => {
+    void stop(signal).finally(() => process.exit(0));
+  };
+
   process.on("SIGINT", () => {
-    void stop("SIGINT").finally(() => process.exit(0));
+    requestStop("SIGINT");
   });
   process.on("SIGTERM", () => {
-    void stop("SIGTERM").finally(() => process.exit(0));
+    requestStop("SIGTERM");
   });
 
   await new Promise<void>(() => {

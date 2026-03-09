@@ -7,6 +7,7 @@ import {
   loopAddRequestSchema,
   loopDelRequestSchema,
   sendRequestSchema,
+  type DaemonStopResponse,
   type IpcResult,
   type SendResponse,
 } from "../../ipc/types.js";
@@ -15,6 +16,7 @@ interface IpcRouteContext {
   runtime: RuntimeEngine;
   loop: LoopScheduler;
   logger: Logger;
+  requestStop?: (reason: string) => void;
 }
 
 interface IpcRequest {
@@ -101,6 +103,23 @@ export function createIpcRouter(context: IpcRouteContext) {
         const body = loopDelRequestSchema.parse(await readJsonBody(request.req));
         const ok = await routeContext.loop.removeJob(body.id);
         writeJson(request.res, 200, { ok: true, data: { deleted: ok, id: body.id } });
+      },
+    },
+    {
+      method: "POST",
+      path: "/daemon/stop",
+      async handle(request, routeContext) {
+        const requestStop = routeContext.requestStop;
+        if (!requestStop) {
+          throw new Error("daemon stop is not enabled");
+        }
+        const payload: DaemonStopResponse = {
+          stopping: true,
+        };
+        writeJson(request.res, 200, { ok: true, data: payload });
+        setImmediate(() => {
+          requestStop("IPC_STOP");
+        });
       },
     },
   ];

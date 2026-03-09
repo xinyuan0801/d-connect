@@ -11,6 +11,7 @@ interface IpcServerOptions {
   runtime: RuntimeEngine;
   loop: LoopScheduler;
   logger: Logger;
+  requestStop?: (reason: string) => void;
 }
 
 async function removeStaleSocket(path: string): Promise<void> {
@@ -68,6 +69,7 @@ export class IpcServer {
       runtime: this.options.runtime,
       loop: this.options.loop,
       logger: this.options.logger,
+      requestStop: this.options.requestStop,
     });
 
     this.server.on("request", (req, res) => {

@@ -567,7 +567,7 @@ function parseInboundContent(raw: DingTalkInboundMessage): ParsedInboundContent 
     }
     case "audio": {
       const recognition = raw.content?.recognition?.trim() ?? "";
-      const currentMedia = recognition.length > 0
+      const currentMedia: ParsedMediaAttachment | undefined = recognition.length > 0
         ? undefined
         : {
             source: "current" as const,
@@ -578,7 +578,7 @@ function parseInboundContent(raw: DingTalkInboundMessage): ParsedInboundContent 
       return {
         messageType: "audio",
         text,
-        preview: text || buildMediaHeading(currentMedia),
+        preview: text || (currentMedia ? buildMediaHeading(currentMedia) : "[DingTalk audio]"),
         currentMedia,
         quotedMedia: quoted.media,
       };
@@ -1458,14 +1458,18 @@ export class DingTalkAdapter implements PlatformAdapter {
         contentPreview: previewContent(parsedContent.preview),
       });
 
+      const sessionWebhook = raw.sessionWebhook?.trim();
+      const sessionWebhookExpiredTime = typeof raw.sessionWebhookExpiredTime === "number"
+        ? raw.sessionWebhookExpiredTime
+        : undefined;
       const hasFreshWebhook =
-        !!raw.sessionWebhook
-        && (typeof raw.sessionWebhookExpiredTime !== "number" || raw.sessionWebhookExpiredTime <= 0 || raw.sessionWebhookExpiredTime > Date.now());
+        !!sessionWebhook
+        && (sessionWebhookExpiredTime === undefined || sessionWebhookExpiredTime <= 0 || sessionWebhookExpiredTime > Date.now());
 
-      const deliveryTarget = hasFreshWebhook
+      const deliveryTarget = hasFreshWebhook && sessionWebhook
         ? createDeliveryTarget(this.name, {
-            sessionWebhook: raw.sessionWebhook,
-            sessionWebhookExpiredTime: raw.sessionWebhookExpiredTime,
+            sessionWebhook,
+            ...(sessionWebhookExpiredTime === undefined ? {} : { sessionWebhookExpiredTime }),
             conversationId: raw.conversationId,
             senderId: userId,
           })

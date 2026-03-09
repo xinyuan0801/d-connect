@@ -95,6 +95,7 @@ export class ConversationService {
 
     try {
       const agentSession = await this.ensureAgentSession(runtime, session);
+      const stillOwnsSession = (): boolean => runtime.sessions.get(session.id) === agentSession;
 
       const onEvent = (event: AgentEvent): void => {
         events.push(event);
@@ -103,7 +104,7 @@ export class ConversationService {
           sessionId: session.id,
           ...summarizeAgentEventForLog(event),
         });
-        if (event.sessionId && event.sessionId.length > 0) {
+        if (stillOwnsSession() && event.sessionId && event.sessionId.length > 0) {
           this.sessions.setAgentSessionId(session, event.sessionId);
         }
         for (const message of renderer.push(event)) {
@@ -126,7 +127,9 @@ export class ConversationService {
         enqueueMessage(message);
       }
 
-      this.sessions.setAgentSessionId(session, agentSession.currentSessionId());
+      if (stillOwnsSession()) {
+        this.sessions.setAgentSessionId(session, agentSession.currentSessionId());
+      }
 
       const resultEvents = events.filter((event) => event.type === "result" && event.content && event.content.trim().length > 0);
       const textEvents = events.filter((event) => event.type === "text" && event.content && event.content.trim().length > 0);
@@ -209,5 +212,9 @@ export class ConversationService {
 
   createSession(project: string, sessionKey: string, name: string): SessionRecord {
     return this.sessions.newSession(this.key(project, sessionKey), name);
+  }
+
+  clearAgentSession(session: SessionRecord): void {
+    this.sessions.setAgentSessionId(session, "");
   }
 }
