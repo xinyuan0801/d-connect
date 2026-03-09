@@ -1,6 +1,6 @@
 import { mkdtemp, mkdir, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { describe, expect, test, vi } from "vitest";
 import {
   IFlowAdapter,
@@ -111,6 +111,22 @@ describe("iflow pending tool tracking", () => {
     const args = adapter.buildIFlowArgs("hello", false);
     expect(args).toContain("-p");
     expect(args).not.toContain("-i");
+  });
+
+  test("spawnEnv prepends node executable directory using platform delimiter", () => {
+    const adapter = createIFlowAdapter(
+      {
+        workDir: "/Users/felixwang/Desktop/d-connect",
+      },
+      new Logger("error"),
+    );
+
+    const env = adapter.spawnEnv();
+    const pathKey = process.platform === "win32" && typeof env.Path === "string" ? "Path" : "PATH";
+    const pathValue = env[pathKey] ?? "";
+    const nodeDir = dirname(process.execPath);
+
+    expect(pathValue === nodeDir || pathValue.startsWith(`${nodeDir}${delimiter}`)).toBe(true);
   });
 
   test("byte offsets still capture new transcript content after multibyte text", () => {

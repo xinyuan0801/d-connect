@@ -5,12 +5,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { describe, expect, test } from "vitest";
+import { resolveIpcEndpoint } from "../src/ipc/endpoint.js";
 import { ensureSocketAvailable } from "../src/ipc/server.js";
 
 describe("ipc socket startup guards", () => {
   test("rejects when another daemon is already listening on the socket", async () => {
     const dir = await mkdtemp(join(tmpdir(), "d-connect-ipc-"));
-    const socketPath = join(dir, "ipc.sock");
+    const socketPath = resolveIpcEndpoint(dir);
     const server = createServer();
 
     await new Promise<void>((resolve) => {
@@ -31,8 +32,13 @@ describe("ipc socket startup guards", () => {
   });
 
   test("removes a stale socket left by a crashed daemon", async () => {
+    if (process.platform === "win32") {
+      // Windows named pipes do not leave stale filesystem entries.
+      return;
+    }
+
     const dir = await mkdtemp(join(tmpdir(), "d-connect-ipc-"));
-    const socketPath = join(dir, "ipc.sock");
+    const socketPath = resolveIpcEndpoint(dir);
 
     const child = spawn(
       process.execPath,

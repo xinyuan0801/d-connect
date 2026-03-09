@@ -1,8 +1,8 @@
-import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { Command } from "commander";
 import { addProjectConfig, initConfig, resolveConfigPathByProject } from "../config/index.js";
 import { ipcDaemonStop, ipcLoopAdd, ipcLoopDel, ipcLoopList, ipcSend } from "../ipc/client.js";
+import { isNamedPipeEndpoint, resolveIpcEndpoint } from "../ipc/endpoint.js";
 import { ensureSocketAvailable } from "../ipc/server.js";
 import { resolveAndLoadConfig, startDaemon } from "./daemon.js";
 
@@ -25,7 +25,7 @@ async function resolveSocketPath(options: { configPath?: string; projectName?: s
   }
 
   const { config } = await resolveAndLoadConfig(configPath);
-  return join(config.dataDir, "ipc.sock");
+  return resolveIpcEndpoint(config.dataDir);
 }
 
 function printError(error: unknown): void {
@@ -76,6 +76,9 @@ async function listSocketOwnerPids(socketPath: string): Promise<number[]> {
 }
 
 async function stopLegacyDaemonBySocketOwner(socketPath: string): Promise<boolean> {
+  if (isNamedPipeEndpoint(socketPath)) {
+    throw new Error("daemon stop fallback via socket owner lookup is unavailable for Windows named pipes");
+  }
   const pids = await listSocketOwnerPids(socketPath);
   let signaled = false;
   for (const pid of pids) {
@@ -138,7 +141,13 @@ export function createCliProgram(): Command {
         stopRequested = true;
       } catch (error) {
         if (isDaemonStopUnsupportedError(error)) {
-          stopRequested = await stopLegacyDaemonBySocketOwner(socketPath);
+          try {
+            stopRequested = await stopLegacyDaemonBySocketOwner(socketPath);
+          } catch {
+            throw new Error(
+              "daemon stop endpoint is unavailable for this daemon version; stop it manually and retry restart",
+            );
+          }
           if (!stopRequested) {
             throw new Error(
               "daemon stop endpoint is unavailable and no daemon process owns the ipc socket; stop it manually and retry",

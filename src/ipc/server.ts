@@ -5,6 +5,7 @@ import { LoopScheduler } from "../scheduler/loop.js";
 import { Logger } from "../logging.js";
 import { RuntimeEngine } from "../runtime/engine.js";
 import { createIpcRouter } from "../infra/ipc/router.js";
+import { isNamedPipeEndpoint } from "./endpoint.js";
 
 interface IpcServerOptions {
   socketPath: string;
@@ -15,6 +16,9 @@ interface IpcServerOptions {
 }
 
 async function removeStaleSocket(path: string): Promise<void> {
+  if (isNamedPipeEndpoint(path)) {
+    return;
+  }
   try {
     await unlink(path);
   } catch {
@@ -52,6 +56,10 @@ export async function ensureSocketAvailable(path: string): Promise<void> {
     return;
   }
   if (state === "stale") {
+    if (isNamedPipeEndpoint(path)) {
+      // Named pipes are not filesystem entries and cannot be unlinked.
+      return;
+    }
     await removeStaleSocket(path);
     return;
   }

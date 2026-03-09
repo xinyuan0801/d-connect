@@ -4,6 +4,7 @@ import { Logger } from "../infra/logging/logger.js";
 import { createLoopStore, LoopScheduler } from "../scheduler/loop.js";
 import { RuntimeEngine } from "../runtime/engine.js";
 import { ensureDir } from "../infra/store-json/atomic.js";
+import { resolveIpcEndpoint } from "../ipc/endpoint.js";
 import { ensureSocketAvailable, IpcServer } from "../ipc/server.js";
 
 export interface StartAppOptions {
@@ -46,16 +47,17 @@ export async function startDaemon(options: StartAppOptions = {}): Promise<void> 
   const runtime = new RuntimeEngine(config, logger.child("runtime"), loopScheduler, {
     configPath,
   });
+  const ipcEndpoint = resolveIpcEndpoint(config.dataDir);
   let requestStop = (_signal: string): void => {};
   const ipcServer = new IpcServer({
-    socketPath: join(config.dataDir, "ipc.sock"),
+    socketPath: ipcEndpoint,
     runtime,
     loop: loopScheduler,
     logger: logger.child("ipc"),
     requestStop: (signal) => requestStop(signal),
   });
 
-  await ensureSocketAvailable(join(config.dataDir, "ipc.sock"));
+  await ensureSocketAvailable(ipcEndpoint);
   await runtime.start();
   await loopScheduler.start();
   await ipcServer.start();

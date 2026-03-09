@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { Logger } from "../../logging.js";
 import type {
@@ -732,7 +732,9 @@ export class IFlowAdapter implements AgentAdapter, ModelSwitchable {
     };
 
     const nodeDir = dirname(process.execPath);
-    env.PATH = `${nodeDir}:${process.env.PATH ?? ""}`;
+    const pathKey = process.platform === "win32" && typeof env.Path === "string" ? "Path" : "PATH";
+    const currentPath = (env[pathKey] ?? env.PATH ?? env.Path ?? "").toString();
+    env[pathKey] = currentPath.length > 0 ? `${nodeDir}${delimiter}${currentPath}` : nodeDir;
     return env;
   }
 
