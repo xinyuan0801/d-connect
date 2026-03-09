@@ -133,8 +133,8 @@ describe("command service", () => {
       session,
       raw: "/new review",
     }));
-    expect(created).toMatch(/created and switched to session/);
-    expect(created).toContain("(review)");
+    expect(created).toContain("已新建并切换到会话");
+    expect(created).toContain("（review）");
 
     const list = expectHandled(await service.handle({
       runtime,
@@ -159,7 +159,7 @@ describe("command service", () => {
       session,
       raw: `/switch ${switchTarget}`,
     }));
-    expect(switched).toContain("active session");
+    expect(switched).toContain("已切换到会话");
 
     expect(
       expectHandled(await service.handle({
@@ -188,7 +188,7 @@ describe("command service", () => {
         session,
         raw: "/mode",
       })),
-    ).toBe("unknown command: mode. use /help");
+    ).toBe("不认识命令：mode。先试试 /help，别让斜杠白挨一下。");
   });
 
   test("handles /stop by closing runtime session and clearing agent session id", async () => {
@@ -206,7 +206,7 @@ describe("command service", () => {
       session,
       raw: "/stop",
     }));
-    expect(stopped).toBe(`stopped session ${session.id}`);
+    expect(stopped).toBe(`已停止会话 ${session.id}。风扇声应该会礼貌一点。`);
     expect(runtimeSession.closeCalls).toBe(1);
     expect(runtime.sessions.has(session.id)).toBe(false);
     expect(session.agentSessionId).toBe("");
@@ -218,7 +218,7 @@ describe("command service", () => {
       session,
       raw: "/stop",
     }));
-    expect(stoppedAgain).toBe(`session already stopped: ${session.id}`);
+    expect(stoppedAgain).toBe(`会话 ${session.id} 早就停了。鞭尸对进程管理帮助不大。`);
   });
 
   test("keeps agent session id cleared when /stop races with an in-flight turn", async () => {
@@ -238,7 +238,7 @@ describe("command service", () => {
       session,
       raw: "/stop",
     }));
-    expect(stopped).toBe(`stopped session ${session.id}`);
+    expect(stopped).toBe(`已停止会话 ${session.id}。风扇声应该会礼貌一点。`);
 
     await expect(turn).resolves.toEqual({
       response: "slow-result",
@@ -266,9 +266,9 @@ describe("command service", () => {
       session,
       raw: "/loop add */10 * * * * * check status",
     }));
-    expect(created).toMatch(/loop created:/);
+    expect(created).toContain("已创建 loop：");
 
-    const id = created.split(": ")[1];
+    const id = created.match(/^已创建 loop：([^。]+)。/)?.[1];
     expect(id).toBeTruthy();
 
     const listed = expectHandled(await service.handle({
@@ -287,7 +287,7 @@ describe("command service", () => {
       session,
       raw: `/loop del ${id}`,
     }));
-    expect(removed).toBe(`loop removed: ${id}`);
+    expect(removed).toBe(`已删除 loop：${id}。又一个准时添堵的家伙退场了。`);
     expect(loop.list("demo")).toHaveLength(0);
   });
 

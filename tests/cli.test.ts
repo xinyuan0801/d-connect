@@ -91,7 +91,7 @@ describe("cli restart command", () => {
 
     if (process.platform === "win32") {
       await expect(createCliProgram().parseAsync(["node", "d-connect", "restart", "-c", configPath])).rejects.toThrow(
-        /stop it manually/i,
+        /请先手动停止旧进程，再重试 restart/,
       );
       expect(mockState.execFile).not.toHaveBeenCalled();
       expect(mockState.startDaemon).not.toHaveBeenCalled();

@@ -514,7 +514,7 @@ describe("runtime integration", () => {
     expect(agent?.guardPrompts).toHaveLength(0);
     expect(agent?.conversationPrompts).toHaveLength(0);
     expect(platform?.replies).toHaveLength(1);
-    expect(platform?.replies[0]?.content).toContain("created and switched to session");
+    expect(platform?.replies[0]?.content).toContain("已新建并切换到会话");
 
     await runtime.stop();
   });

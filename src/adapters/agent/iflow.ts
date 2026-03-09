@@ -32,6 +32,8 @@ const TURN_POST_TOOL_RESPONSE_TIMEOUT_MS = 60000;
 const PENDING_TOOL_TIMEOUT_MS = 180000;
 const TURN_HARD_TIMEOUT_MS = 120000;
 const TURN_NO_RESULT_TIMEOUT_MS = 60000;
+const TASK_TOOL_NAME = "task";
+const TASK_TOOL_TIMEOUT_MS = 300000;
 const TRANSCRIPT_READ_MAX_BYTES_PER_POLL = 256 * 1024;
 const PROCESS_OUTPUT_PROBE_MAX_LEN = 20000;
 const IFLOW_OUTPUT_FILE_ROOT = "d-connect-iflow-output";
@@ -666,8 +668,9 @@ class IFlowSession extends EventEmitter implements AgentSession {
     if (turn.pendingTools.size === 0 || turn.pendingStartedAt === 0) {
       return false;
     }
+    const timeoutMs = this.pendingToolTimeoutMs(turn);
     const latestActivityAt = Math.max(turn.pendingStartedAt, turn.lastActivityAt);
-    if (Date.now() - latestActivityAt < turn.pendingTimeoutMs) {
+    if (Date.now() - latestActivityAt < timeoutMs) {
       return false;
     }
 
@@ -675,7 +678,7 @@ class IFlowSession extends EventEmitter implements AgentSession {
     this.adapter.logger.warn("iflow tool execution timed out", {
       sessionId: this.currentSessionId(),
       pendingTools: names,
-      timeoutMs: turn.pendingTimeoutMs,
+      timeoutMs,
       mode: this.adapter.getMode(),
     });
     turn.pendingTools.clear();
@@ -688,7 +691,7 @@ class IFlowSession extends EventEmitter implements AgentSession {
     if (!turn.awaitingPostToolResponse || turn.pendingTools.size > 0 || turn.lastToolActivityAt === 0) {
       return false;
     }
-    if (Date.now() - turn.lastToolActivityAt < TURN_POST_TOOL_RESPONSE_TIMEOUT_MS) {
+    if (Date.now() - turn.lastToolActivityAt < this.postToolResponseTimeoutMs(turn)) {
       return false;
     }
     return true;
@@ -705,7 +708,7 @@ class IFlowSession extends EventEmitter implements AgentSession {
 
   private shouldFinishByHardTimeout(turn: TurnState): boolean {
     const latestActivityAt = Math.max(turn.startedAt, turn.lastActivityAt);
-    if (Date.now() - latestActivityAt < TURN_HARD_TIMEOUT_MS) {
+    if (Date.now() - latestActivityAt < this.hardTimeoutMs(turn)) {
       return false;
     }
     if (turn.resultChunks.length === 0) {
@@ -726,6 +729,26 @@ class IFlowSession extends EventEmitter implements AgentSession {
       return `命令已在后台启动，任务 ID: ${backgroundTaskId}。`;
     }
     return "iflow 在工具执行后结束了当前轮次，但没有产出最终回复；已保留底层续聊状态。";
+  }
+
+  private pendingToolTimeoutMs(turn: Pick<TurnState, "pendingTools" | "pendingTimeoutMs">): number {
+    if ([...turn.pendingTools.values()].includes(TASK_TOOL_NAME)) {
+      return Math.max(turn.pendingTimeoutMs, TASK_TOOL_TIMEOUT_MS);
+    }
+    return turn.pendingTimeoutMs;
+  }
+
+  private postToolResponseTimeoutMs(turn: Pick<TurnState, "lastToolResultToolName">): number {
+    return turn.lastToolResultToolName === TASK_TOOL_NAME ? TASK_TOOL_TIMEOUT_MS : TURN_POST_TOOL_RESPONSE_TIMEOUT_MS;
+  }
+
+  private hardTimeoutMs(
+    turn: Pick<TurnState, "pendingTools" | "awaitingPostToolResponse" | "lastToolResultToolName">,
+  ): number {
+    const waitingOnTask =
+      [...turn.pendingTools.values()].includes(TASK_TOOL_NAME) ||
+      (turn.awaitingPostToolResponse && turn.lastToolResultToolName === TASK_TOOL_NAME);
+    return waitingOnTask ? Math.max(TURN_HARD_TIMEOUT_MS, TASK_TOOL_TIMEOUT_MS) : TURN_HARD_TIMEOUT_MS;
   }
 
   private async waitForTurnResult(child: ReturnType<typeof spawn>, turn: TurnState): Promise<SpawnResult> {
@@ -983,10 +1006,11 @@ export class IFlowAdapter implements AgentAdapter, ModelSwitchable {
     }
 
     const candidates = this.sessionDirs.map((dir) => join(dir, `${normalizedSessionId}.jsonl`));
-    const hasPreferredCandidate = Boolean(preferredPath) && candidates.includes(preferredPath);
-    const orderedCandidates =
-      hasPreferredCandidate
-        ? [preferredPath, ...candidates.filter((candidate) => candidate !== preferredPath)]
+    const preferredCandidate = preferredPath && preferredPath.length > 0 ? preferredPath : undefined;
+    const hasPreferredCandidate = preferredCandidate ? candidates.includes(preferredCandidate) : false;
+    const orderedCandidates: string[] =
+      hasPreferredCandidate && preferredCandidate
+        ? [preferredCandidate, ...candidates.filter((candidate) => candidate !== preferredCandidate)]
         : candidates;
 
     for (const candidate of orderedCandidates) {

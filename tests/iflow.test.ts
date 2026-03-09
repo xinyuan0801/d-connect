@@ -630,6 +630,73 @@ How can I assist you today?
     vi.useRealTimers();
   });
 
+  test("task tool timeout waits up to 5 minutes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-08T10:04:44.000Z"));
+
+    const logger = new Logger("error");
+    const warnSpy = vi.spyOn(logger, "warn");
+    const adapter = new IFlowAdapter(
+      {
+        workDir: "/Users/felixwang/Desktop/d-connect",
+      },
+      logger,
+    );
+
+    const session = (await adapter.startSession("session-task-timeout")) as any;
+    const turn = {
+      resultChunks: [],
+      pendingTools: new Map([["task:0", "task"]]),
+      pendingStartedAt: Date.now() - 181000,
+      pendingTimeoutMs: 180000,
+      lastTextAt: 0,
+      lastActivityAt: Date.now() - 181000,
+    };
+
+    expect(session.shouldFinishByToolTimeout(turn)).toBe(false);
+
+    turn.pendingStartedAt = Date.now() - 301000;
+    turn.lastActivityAt = Date.now() - 301000;
+    expect(session.shouldFinishByToolTimeout(turn)).toBe(true);
+    expect(warnSpy).toHaveBeenCalledWith("iflow tool execution timed out", {
+      sessionId: "session-task-timeout",
+      pendingTools: ["task"],
+      timeoutMs: 300000,
+      mode: "yolo",
+    });
+
+    await adapter.stop();
+    vi.useRealTimers();
+  });
+
+  test("task post-tool response timeout waits up to 5 minutes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-08T10:04:44.000Z"));
+
+    const adapter = new IFlowAdapter(
+      {
+        workDir: "/Users/felixwang/Desktop/d-connect",
+      },
+      new Logger("error"),
+    );
+
+    const session = (await adapter.startSession("session-task-post-tool-timeout")) as any;
+    const turn = {
+      awaitingPostToolResponse: true,
+      pendingTools: new Map(),
+      lastToolActivityAt: Date.now() - 61000,
+      lastToolResultToolName: "task",
+    };
+
+    expect(session.shouldFinishByPostToolResponseTimeout(turn)).toBe(false);
+
+    turn.lastToolActivityAt = Date.now() - 301000;
+    expect(session.shouldFinishByPostToolResponseTimeout(turn)).toBe(true);
+
+    await adapter.stop();
+    vi.useRealTimers();
+  });
+
   test("hard timeout waits for transcript inactivity instead of total turn age", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-08T10:04:44.000Z"));
@@ -665,6 +732,45 @@ How can I assist you today?
     expect(session.shouldFinishByHardTimeout(stalledTurn)).toBe(true);
     expect(stalledTurn.resultChunks).toEqual(["iflow turn timeout"]);
     expect(stalledTurn.pendingTools.size).toBe(0);
+
+    await adapter.stop();
+    vi.useRealTimers();
+  });
+
+  test("task hard timeout waits up to 5 minutes while awaiting final reply", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-08T10:04:44.000Z"));
+
+    const adapter = new IFlowAdapter(
+      {
+        workDir: "/Users/felixwang/Desktop/d-connect",
+      },
+      new Logger("error"),
+    );
+
+    const session = (await adapter.startSession("session-task-hard-timeout")) as any;
+    const activeTurn = {
+      resultChunks: [],
+      pendingTools: new Map(),
+      awaitingPostToolResponse: true,
+      lastToolResultToolName: "task",
+      pendingStartedAt: 0,
+      pendingTimeoutMs: 180000,
+      lastTextAt: 0,
+      lastActivityAt: Date.now() - 121000,
+      startedAt: Date.now() - 301000,
+    };
+
+    expect(session.shouldFinishByHardTimeout(activeTurn)).toBe(false);
+
+    const stalledTurn = {
+      ...activeTurn,
+      resultChunks: [],
+      lastActivityAt: Date.now() - 301000,
+    };
+
+    expect(session.shouldFinishByHardTimeout(stalledTurn)).toBe(true);
+    expect(stalledTurn.resultChunks).toEqual(["iflow turn timeout"]);
 
     await adapter.stop();
     vi.useRealTimers();

@@ -67,7 +67,9 @@ describe("allowFrom wildcard warning", () => {
     ]);
 
     expect(warning).toContain("____  _   _ ___ _   _  ____");
-    expect(warning).toContain("allowFrom = \"*\" exposes your bot to every reachable user.");
+    expect(warning).toContain("检测到 allowFrom = \"*\"：任何能连到这个机器人的用户都可能直接开聊。");
+    expect(warning).toContain("如果这是共享群聊或公共环境，请先收紧 platform.options.allowFrom，再启动守护进程。");
+    expect(warning).toContain("受影响的目标：");
     expect(warning).toContain("  - demo-project / dingtalk");
     expect(warning).toContain("  - ops-bot / feishu");
   });

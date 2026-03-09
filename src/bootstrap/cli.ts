@@ -19,7 +19,7 @@ async function resolveSocketPath(options: { configPath?: string; projectName?: s
       configPath = resolution.path;
     } else if (resolution.status === "ambiguous" && resolution.candidates) {
       throw new Error(
-        `multiple config files contain project "${options.projectName}": ${formatConfigCandidates(resolution.candidates)}; pass -c to choose one`,
+        `有多个配置文件都包含项目 "${options.projectName}"：${formatConfigCandidates(resolution.candidates)}；请用 -c 指定一个。`,
       );
     }
   }
@@ -59,7 +59,7 @@ async function listSocketOwnerPids(socketPath: string): Promise<number[]> {
           return;
         }
         if (code === "ENOENT") {
-          reject(new Error("daemon stop fallback requires lsof, but it was not found"));
+          reject(new Error("restart 的兼容降级依赖 lsof，但当前环境里没找到它。"));
           return;
         }
         reject(error);
@@ -77,7 +77,7 @@ async function listSocketOwnerPids(socketPath: string): Promise<number[]> {
 
 async function stopLegacyDaemonBySocketOwner(socketPath: string): Promise<boolean> {
   if (isNamedPipeEndpoint(socketPath)) {
-    throw new Error("daemon stop fallback via socket owner lookup is unavailable for Windows named pipes");
+    throw new Error("Windows 命名管道不支持通过 socket owner 兜底停止旧 daemon。");
   }
   const pids = await listSocketOwnerPids(socketPath);
   let signaled = false;
@@ -107,7 +107,7 @@ async function waitUntilSocketCanStart(socketPath: string, timeoutMs = 10_000): 
         throw error;
       }
       if (Date.now() - startedAt >= timeoutMs) {
-        throw new Error(`daemon stop timed out after ${timeoutMs}ms`);
+        throw new Error(`等待旧 daemon 退出超时（${timeoutMs}ms）。它似乎还不想下班。`);
       }
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
@@ -123,16 +123,16 @@ export function createCliProgram(): Command {
 
   program
     .command("start")
-    .description("Start daemon")
-    .option("-c, --config <path>", "Path to config.json")
+    .description("启动守护进程")
+    .option("-c, --config <path>", "config.json 路径")
     .action(async (opts: { config?: string }) => {
       await startDaemon({ explicitConfigPath: opts.config });
     });
 
   program
     .command("restart")
-    .description("Restart daemon")
-    .option("-c, --config <path>", "Path to config.json")
+    .description("重启守护进程")
+    .option("-c, --config <path>", "config.json 路径")
     .action(async (opts: { config?: string }) => {
       const socketPath = await resolveSocketPath({ configPath: opts.config });
       let stopRequested = false;
@@ -145,12 +145,12 @@ export function createCliProgram(): Command {
             stopRequested = await stopLegacyDaemonBySocketOwner(socketPath);
           } catch {
             throw new Error(
-              "daemon stop endpoint is unavailable for this daemon version; stop it manually and retry restart",
+              "当前 daemon 版本不支持 stop 接口，兼容降级也失败了；请先手动停止旧进程，再重试 restart。",
             );
           }
           if (!stopRequested) {
             throw new Error(
-              "daemon stop endpoint is unavailable and no daemon process owns the ipc socket; stop it manually and retry",
+              "当前 daemon 版本不支持 stop 接口，而且没有进程占用这个 IPC socket；请先确认旧进程状态，再手动处理后重试。",
             );
           }
         } else if (!isIpcUnavailableError(error)) {

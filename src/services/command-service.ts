@@ -109,30 +109,30 @@ export class CommandService {
     switch (command) {
       case "help":
         return handled([
-          "commands:",
-          "/help",
-          "/new [name]  create and switch to a new session",
-          "/list",
-          "/switch <id|name>",
-          "/stop",
-          "/loop <request>",
-          "/loop list",
-          "/loop add <expr> <prompt>",
-          "/loop del <id>",
+          "可用命令如下，背下来不一定升职，但至少少问一次 /help：",
+          "/help  看这份说明书，它暂时还没学会敷衍你",
+          "/new [name]  新建并切换到一个会话，给上下文换个抽屉",
+          "/list  列出当前聊天对象下的会话清单",
+          "/switch <id|name>  切到指定会话，别让上下文继续串门",
+          "/stop  停掉当前会话对应的 Agent 进程，让 CPU 先喘口气",
+          "/loop <request>  用自然语言描述一个定时任务",
+          "/loop list  查看当前聊天对象下的 loop 任务",
+          "/loop add <expr> <prompt>  直接创建 loop，和闹钟一样准时烦人",
+          "/loop del <id>  删除 loop，给世界减少一个准点打扰",
         ].join("\n"));
 
       case "new": {
         const name = parts.slice(1).join(" ").trim() || `session-${Date.now()}`;
         const created = this.conversations.createSession(project, sessionKey, name);
         await this.conversations.save();
-        return handled(`created and switched to session ${created.id} (${created.name})`);
+        return handled(`已新建并切换到会话 ${created.id}（${created.name}）。旧上下文先去角落冷静一下。`);
       }
 
       case "list": {
         const active = this.conversations.getOrCreateActiveSession(project, sessionKey);
         const list = this.conversations.listSessions(project, sessionKey);
         if (list.length === 0) {
-          return handled("no sessions");
+          return handled("当前还没有会话。场面一度十分安静。");
         }
         return handled(
           list
@@ -144,14 +144,14 @@ export class CommandService {
       case "switch": {
         const target = parts[1];
         if (!target) {
-          return handled("usage: /switch <id|name>");
+          return handled("用法：/switch <id|name>。机器不会读心，这次先提醒你。");
         }
         const found = this.conversations.switchSession(project, sessionKey, target);
         if (!found) {
-          return handled(`session not found: ${target}`);
+          return handled(`没找到会话：${target}。它可能改名了，也可能从没存在过。`);
         }
         await this.conversations.save();
-        return handled(`active session: ${found.id} (${found.name})`);
+        return handled(`已切换到会话 ${found.id}（${found.name}）。上下文重新排好队了。`);
       }
 
       case "stop": {
@@ -160,24 +160,24 @@ export class CommandService {
           runtime.sessions.delete(session.id);
           this.conversations.clearAgentSession(session);
           await this.conversations.save();
-          return handled(`session already stopped: ${session.id}`);
+          return handled(`会话 ${session.id} 早就停了。鞭尸对进程管理帮助不大。`);
         }
 
         await runningSession.close();
         runtime.sessions.delete(session.id);
         this.conversations.clearAgentSession(session);
         await this.conversations.save();
-        return handled(`stopped session ${session.id}`);
+        return handled(`已停止会话 ${session.id}。风扇声应该会礼貌一点。`);
       }
 
       case "loop": {
         if (!this.loopScheduler) {
-          return handled("loop scheduler is not enabled");
+          return handled("当前没启用 loop 调度器。这台机器暂时还不会自己惦记事情。");
         }
 
         const sub = (parts[1] ?? "").toLowerCase();
         if (!sub || sub === "help") {
-          return handled("usage: /loop <request> | /loop list | /loop add <expr> <prompt> | /loop del <id>");
+          return handled("用法：/loop <request> | /loop list | /loop add <expr> <prompt> | /loop del <id>。时间要写清，宇宙不会帮你补全。");
         }
 
         if (sub === "list") {
@@ -186,7 +186,7 @@ export class CommandService {
             .filter((job) => job.sessionKey === sessionKey)
             .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
           if (jobs.length === 0) {
-            return handled("no loop jobs");
+            return handled("当前没有 loop 任务。说明定时打扰功能还算克制。");
           }
           return handled(
             jobs
@@ -198,7 +198,7 @@ export class CommandService {
         if (sub === "add") {
           const parsed = parseLoopAddInput(raw);
           if (!parsed) {
-            return handled("usage: /loop add <expr> <prompt>");
+            return handled("用法：/loop add <expr> <prompt>。cron 不写对，时间也只会装作路过。");
           }
           const job = await this.loopScheduler.addJob({
             project,
@@ -208,16 +208,20 @@ export class CommandService {
             description: `chat:${session.id}`,
             silent: false,
           });
-          return handled(`loop created: ${job.id}`);
+          return handled(`已创建 loop：${job.id}。从现在起，它会比你更记得这件事。`);
         }
 
         if (sub === "del") {
           const id = parts[2];
           if (!id) {
-            return handled("usage: /loop del <id>");
+            return handled("用法：/loop del <id>。不给 ID，我也不敢乱删，毕竟还想活。");
           }
           const removed = await this.loopScheduler.removeJob(id);
-          return handled(removed ? `loop removed: ${id}` : `loop not found: ${id}`);
+          return handled(
+            removed
+              ? `已删除 loop：${id}。又一个准时添堵的家伙退场了。`
+              : `没找到 loop：${id}。它可能已被删掉，或者从一开始就在摸鱼。`,
+          );
         }
 
         return {
@@ -227,7 +231,7 @@ export class CommandService {
       }
 
       default:
-        return handled(`unknown command: ${command}. use /help`);
+        return handled(`不认识命令：${command}。先试试 /help，别让斜杠白挨一下。`);
     }
   }
 }

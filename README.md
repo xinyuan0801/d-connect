@@ -158,6 +158,8 @@ d-connect start
 | `/loop add <expr> <prompt>` | 直接创建 loop |
 | `/loop del <id>` | 删除 loop |
 
+这些命令的回执默认是中文提示，偶尔会夹带一点不影响下班的冷幽默。
+
 ## 常用 CLI 命令
 
 | 命令 | 作用 |

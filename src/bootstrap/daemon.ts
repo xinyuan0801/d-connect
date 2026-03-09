@@ -47,10 +47,10 @@ export function formatAllowAllWarning(targets: AllowAllWarningTarget[]): string 
     "   \\ V  V / ___ \\|  _ <| |\\  || || |\\  | |_| |",
     "    \\_/\\_/_/   \\_\\_| \\_\\_| \\_|___|_| \\_|\\____|",
     "",
-    "allowFrom = \"*\" exposes your bot to every reachable user.",
-    "Restrict platform.options.allowFrom before using this daemon in shared chats.",
+    "检测到 allowFrom = \"*\"：任何能连到这个机器人的用户都可能直接开聊。",
+    "如果这是共享群聊或公共环境，请先收紧 platform.options.allowFrom，再启动守护进程。",
     "",
-    "Exposed targets:",
+    "受影响的目标：",
     exposedTargets,
     "",
   ].join("\n");
@@ -63,7 +63,7 @@ export async function resolveAndLoadConfig(explicitConfigPath?: string) {
   if (!exists) {
     await bootstrapConfig(configPath);
     throw new Error(
-      `config file created at ${configPath}; edit it before starting d-connect, or run \"d-connect init -c ${configPath} --force\"`,
+      `已在 ${configPath} 创建配置文件；先改完配置再启动 d-connect，或者执行 "d-connect init -c ${configPath} --force" 重新生成。`,
     );
   }
 
