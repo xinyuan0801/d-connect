@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { open, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -15,11 +15,13 @@ import type {
 } from "../../runtime/types.js";
 import type { BaseAgentOptions } from "./options.js";
 import {
+  extractLatestExecutionInfo,
   extractAssistantParts,
   extractToolResults,
   type IFlowToolResult,
   type IFlowToolUse,
   iflowProjectKey,
+  sanitizeIFlowAssistantText,
   summarizeToolInput,
 } from "./iflow-transcript.js";
 
@@ -31,6 +33,8 @@ const PENDING_TOOL_TIMEOUT_MS = 60000;
 const TURN_HARD_TIMEOUT_MS = 120000;
 const TURN_NO_RESULT_TIMEOUT_MS = 60000;
 const POST_TOOL_SESSION_RETRY_MAX = 1;
+const TRANSCRIPT_READ_MAX_BYTES_PER_POLL = 256 * 1024;
+const PROCESS_OUTPUT_PROBE_MAX_LEN = 20000;
 const POST_TOOL_SESSION_RETRY_PROMPT =
   "Continue from the latest tool results and provide the final user-facing reply now. Do not ask follow-up questions.";
 
@@ -51,8 +55,10 @@ interface SpawnResult {
 
 interface TurnState {
   transcriptPath?: string;
+  transcriptBindingSource?: "session-id" | "mtime";
   offset: number;
   partial: string;
+  outputProbe: string;
   resultChunks: string[];
   lastTextAt: number;
   lastActivityAt: number;
@@ -142,6 +148,68 @@ export function readTranscriptDelta(full: Buffer, offset: number): { chunk: stri
     chunk: nextChunk.toString("utf8"),
     nextOffset: full.length,
   };
+}
+
+export interface TranscriptTailReadResult {
+  found: boolean;
+  truncated: boolean;
+  chunk: string;
+  nextOffset: number;
+}
+
+export async function readTranscriptDeltaFromFile(
+  path: string,
+  offset: number,
+  maxBytes = TRANSCRIPT_READ_MAX_BYTES_PER_POLL,
+): Promise<TranscriptTailReadResult> {
+  const safeOffset = offset > 0 ? offset : 0;
+
+  let handle;
+  try {
+    handle = await open(path, "r");
+  } catch {
+    return {
+      found: false,
+      truncated: false,
+      chunk: "",
+      nextOffset: safeOffset,
+    };
+  }
+
+  try {
+    const info = await handle.stat();
+    const size = Number(info.size);
+
+    if (size < safeOffset) {
+      return {
+        found: true,
+        truncated: true,
+        chunk: "",
+        nextOffset: 0,
+      };
+    }
+
+    if (size === safeOffset) {
+      return {
+        found: true,
+        truncated: false,
+        chunk: "",
+        nextOffset: safeOffset,
+      };
+    }
+
+    const bytesToRead = Math.min(size - safeOffset, maxBytes);
+    const buffer = Buffer.alloc(bytesToRead);
+    const { bytesRead } = await handle.read(buffer, 0, bytesToRead, safeOffset);
+    return {
+      found: true,
+      truncated: false,
+      chunk: buffer.subarray(0, bytesRead).toString("utf8"),
+      nextOffset: safeOffset + bytesRead,
+    };
+  } finally {
+    await handle.close();
+  }
 }
 
 export function shouldFinishByIdleState(state: {
@@ -286,6 +354,54 @@ class IFlowSession extends EventEmitter implements AgentSession {
     }
   }
 
+  private bindTranscriptBySessionId(turn: TurnState, sessionId: string, source: string): void {
+    const normalizedSessionId = sessionId.trim();
+    if (!normalizedSessionId) {
+      return;
+    }
+
+    this.setAgentSessionId(normalizedSessionId);
+    const expectedPath = join(this.adapter.sessionDir, `${normalizedSessionId}.jsonl`);
+
+    if (turn.transcriptPath === expectedPath) {
+      turn.transcriptBindingSource = "session-id";
+      return;
+    }
+
+    if (turn.transcriptPath && turn.transcriptBindingSource === "mtime") {
+      const consumedTranscriptEvents =
+        turn.resultChunks.length > 0 || turn.seenToolUseIds.size > 0 || turn.completedToolUseIds.size > 0;
+      if (consumedTranscriptEvents) {
+        this.adapter.logger.warn("iflow resolved session id after mtime transcript already consumed output", {
+          sessionId: normalizedSessionId,
+          currentPath: turn.transcriptPath,
+          expectedPath,
+          source,
+        });
+        return;
+      }
+    }
+
+    turn.transcriptPath = expectedPath;
+    turn.transcriptBindingSource = "session-id";
+    turn.offset = 0;
+    turn.partial = "";
+  }
+
+  private probeExecutionInfoFromOutput(turn: TurnState, chunk: string): void {
+    if (!chunk) {
+      return;
+    }
+
+    turn.outputProbe = appendLimited(turn.outputProbe, chunk, PROCESS_OUTPUT_PROBE_MAX_LEN);
+    const info = extractLatestExecutionInfo(turn.outputProbe);
+    if (!info?.sessionId) {
+      return;
+    }
+
+    this.bindTranscriptBySessionId(turn, info.sessionId, "execution-info");
+  }
+
   private emitAgentEvent(event: AgentEvent): void {
     const effectiveSessionId = this.currentSessionId();
     const nextEvent =
@@ -300,18 +416,33 @@ class IFlowSession extends EventEmitter implements AgentSession {
 
   private async loadNewTranscript(turn: TurnState): Promise<void> {
     if (!turn.transcriptPath) {
+      this.bindTranscriptBySessionId(turn, this.currentSessionId(), "session-state");
+    }
+
+    if (!turn.transcriptPath) {
       turn.transcriptPath = await findLatestTranscript(this.adapter.sessionDir, turn.startedAt);
       if (!turn.transcriptPath) {
         return;
       }
+      turn.transcriptBindingSource = "mtime";
       // New transcript discovered during this turn: consume from the beginning.
       turn.offset = 0;
       turn.partial = "";
     }
 
-    const full = await readFile(turn.transcriptPath);
-    const { chunk: nextChunk, nextOffset } = readTranscriptDelta(full, turn.offset);
+    const delta = await readTranscriptDeltaFromFile(turn.transcriptPath, turn.offset);
+    if (!delta.found) {
+      return;
+    }
+    if (delta.truncated) {
+      turn.offset = delta.nextOffset;
+      turn.partial = "";
+      return;
+    }
+
+    const { chunk: nextChunk, nextOffset } = delta;
     if (!nextChunk) {
+      turn.offset = nextOffset;
       return;
     }
     turn.offset = nextOffset;
@@ -336,14 +467,18 @@ class IFlowSession extends EventEmitter implements AgentSession {
       }
 
       if (item.sessionId) {
-        this.setAgentSessionId(item.sessionId);
+        this.bindTranscriptBySessionId(turn, item.sessionId, "transcript-line");
       }
 
       if (item.type === "assistant") {
         for (const part of extractAssistantParts(item.message?.content)) {
           if (part.type === "text") {
-            turn.resultChunks.push(part.text);
-            this.emitAgentEvent({ type: "text", content: part.text });
+            const cleaned = sanitizeIFlowAssistantText(part.text);
+            if (!cleaned) {
+              continue;
+            }
+            turn.resultChunks.push(cleaned);
+            this.emitAgentEvent({ type: "text", content: cleaned });
             turn.lastTextAt = Date.now();
             turn.lastActivityAt = turn.lastTextAt;
             if (turn.awaitingPostToolResponse) {
@@ -535,10 +670,14 @@ class IFlowSession extends EventEmitter implements AgentSession {
     });
 
     child.stdout.on("data", (chunk: Buffer) => {
-      tails.stdout = appendLimited(tails.stdout, chunk.toString("utf8"));
+      const text = chunk.toString("utf8");
+      tails.stdout = appendLimited(tails.stdout, text);
+      this.probeExecutionInfoFromOutput(turn, text);
     });
     child.stderr.on("data", (chunk: Buffer) => {
-      tails.stderr = appendLimited(tails.stderr, chunk.toString("utf8"));
+      const text = chunk.toString("utf8");
+      tails.stderr = appendLimited(tails.stderr, text);
+      this.probeExecutionInfoFromOutput(turn, text);
     });
 
     try {
@@ -566,9 +705,11 @@ class IFlowSession extends EventEmitter implements AgentSession {
 
     try {
       const turn: TurnState = {
-        transcriptPath: this.agentSessionId ? join(this.adapter.sessionDir, `${this.agentSessionId}.jsonl`) : undefined,
+        transcriptPath: undefined,
+        transcriptBindingSource: undefined,
         offset: 0,
         partial: "",
+        outputProbe: "",
         resultChunks: [],
         lastTextAt: 0,
         lastActivityAt: Date.now(),
@@ -583,6 +724,7 @@ class IFlowSession extends EventEmitter implements AgentSession {
         startedAt: Date.now(),
       };
 
+      this.bindTranscriptBySessionId(turn, this.currentSessionId(), "send-start");
       if (turn.transcriptPath && existsSync(turn.transcriptPath)) {
         turn.offset = await fileSize(turn.transcriptPath);
       }
@@ -639,11 +781,21 @@ class IFlowSession extends EventEmitter implements AgentSession {
         throw new Error(err);
       }
 
-      const fallback = normalizeWhitespace(`${tails.stdout}\n${tails.stderr}`);
+      const rawFallback = normalizeWhitespace(`${tails.stdout}\n${tails.stderr}`);
+      const fallback = sanitizeIFlowAssistantText(rawFallback);
       if (fallback.length > 0) {
         this.emitAgentEvent({
           type: "result",
           content: fallback,
+          done: true,
+        });
+        return;
+      }
+
+      if (rawFallback.length > 0) {
+        this.emitAgentEvent({
+          type: "result",
+          content: "iflow 返回了会话元信息，但没有产出可转发的最终回复。",
           done: true,
         });
         return;

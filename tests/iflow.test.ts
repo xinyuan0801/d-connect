@@ -9,12 +9,13 @@ import {
   recordAssistantTools,
   recordToolResults,
   readTranscriptDelta,
+  readTranscriptDeltaFromFile,
   shouldRetryPostToolInSession,
   shouldFinishByIdleState,
   shouldFinishByNoResultState,
   type IFlowPendingToolState,
 } from "../src/adapters/agent/iflow.js";
-import { extractAssistantParts } from "../src/adapters/agent/iflow-transcript.js";
+import { extractAssistantParts, extractLatestExecutionInfo, sanitizeIFlowAssistantText } from "../src/adapters/agent/iflow-transcript.js";
 import { Logger } from "../src/logging.js";
 
 function createState(): IFlowPendingToolState {
@@ -137,6 +138,40 @@ describe("iflow pending tool tracking", () => {
     const delta = readTranscriptDelta(full, first.length);
     expect(delta.chunk).toContain("你刚才问的是杭州今天天气如何");
     expect(delta.nextOffset).toBe(full.length);
+  });
+
+  test("tail reader captures only appended transcript bytes from file", async () => {
+    const root = await mkdtemp(join(tmpdir(), "d-connect-iflow-tail-"));
+    const transcriptPath = join(root, "session-tail.jsonl");
+    const first = '{"type":"assistant","message":{"content":[{"type":"text","text":"第一段"}]}}\n';
+    const second = '{"type":"assistant","message":{"content":[{"type":"text","text":"第二段"}]}}\n';
+    await writeFile(transcriptPath, `${first}${second}`, "utf8");
+
+    const delta = await readTranscriptDeltaFromFile(transcriptPath, Buffer.byteLength(first, "utf8"));
+    expect(delta.found).toBe(true);
+    expect(delta.truncated).toBe(false);
+    expect(delta.chunk).toContain("第二段");
+    expect(delta.nextOffset).toBe(Buffer.byteLength(`${first}${second}`, "utf8"));
+  });
+
+  test("extracts session id from execution info block", () => {
+    const info = extractLatestExecutionInfo(`some text
+<Execution Info>
+{
+  "session-id": "session-abc",
+  "conversation-id": "conv-123"
+}
+</Execution Info>`);
+    expect(info?.sessionId).toBe("session-abc");
+    expect(info?.conversationId).toBe("conv-123");
+  });
+
+  test("extracts session id from partial execution info tail", () => {
+    const info = extractLatestExecutionInfo(`<Execution Info>
+{
+  "session-id": "session-tail"
+`);
+    expect(info?.sessionId).toBe("session-tail");
   });
 
   test("waits longer after tool activity before treating the turn as idle", () => {
@@ -269,6 +304,65 @@ describe("iflow pending tool tracking", () => {
       { type: "text", text: "我来帮你搜一下。" },
       { type: "tool_use", tool: { id: "web_search:0", name: "web_search", input: { query: "hello" } } },
     ]);
+  });
+
+  test("sanitizes Aone bootstrap wrappers and execution info blocks", () => {
+    const raw = `Using cached Aone authentication.
+
+Hello! Welcome to iFlow CLI.
+
+I see you're working in \`/Users/wxy/third-step\` on macOS.
+
+The workspace appears to be empty currently.
+
+这里是最终答复内容。
+
+<Execution Info>
+{
+  "session-id": "session-3f897e64",
+  "conversation-id": "93a008df"
+}
+</Execution Info>`;
+
+    expect(sanitizeIFlowAssistantText(raw)).toBe("这里是最终答复内容。");
+  });
+
+  test("fallback metadata-only output emits friendly result instead of raw wrapper text", async () => {
+    const adapter = new IFlowAdapter(
+      {
+        workDir: "/Users/felixwang/Desktop/d-connect",
+      },
+      new Logger("error"),
+    );
+
+    const session = (await adapter.startSession("session-meta-only")) as any;
+    session.runSingleTurn = vi.fn(async (_prompt: string, _continueConversation: boolean, _turn: unknown, tails: { stdout: string; stderr: string }) => {
+      tails.stdout = `Using cached Aone authentication.
+
+Hello! Welcome to iFlow CLI.
+
+How can I assist you today?
+
+<Execution Info>
+{
+  "session-id": "session-3f897e64"
+}
+</Execution Info>`;
+      tails.stderr = "";
+      return { code: 0, signal: null };
+    });
+
+    const events: Array<{ type?: string; content?: string }> = [];
+    session.on("event", (event: { type?: string; content?: string }) => {
+      events.push(event);
+    });
+
+    await session.send("hello");
+
+    expect(events.at(-1)?.type).toBe("result");
+    expect(events.at(-1)?.content).toBe("iflow 返回了会话元信息，但没有产出可转发的最终回复。");
+
+    await adapter.stop();
   });
 
   test("tool timeouts are logged without appending timeout text to the reply", async () => {
