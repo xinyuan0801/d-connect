@@ -408,6 +408,29 @@ The workspace appears to be empty currently.
     expect(sanitizeIFlowAssistantText(raw)).toBe("这里是最终答复内容。");
   });
 
+  test("sanitizes session resume and SDK shutdown noise after the final answer", () => {
+    const raw = `当前目录包含以下四个文件：
+1. index.html - 这是一个前端抽奖系统的HTML页面
+2. style.css - 包含页面样式
+3. script.js - 实现抽奖逻辑
+4. lottery-result.jpg - 抽奖结果截图
+
+整体来看，这是一个完整的前端抽奖系统，具有良好的用户界面和交互体验。
+ℹ️  Resuming session
+session-57ec4bfa-e913-45c6-8545-2a20311e8fd4 (2 messages loaded)
+Error shutting down SDK: TypeError: r is not a function
+    at _promiseQueue.pushPromise._transport.send.then.r.code (file:///Users/wxy/.nvm/versions/node/v22.17.1/lib/node_modules/@ali/iflow-cli/bundle/iflow.js:446:99411)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)`;
+
+    expect(sanitizeIFlowAssistantText(raw)).toBe(`当前目录包含以下四个文件：
+1. index.html - 这是一个前端抽奖系统的HTML页面
+2. style.css - 包含页面样式
+3. script.js - 实现抽奖逻辑
+4. lottery-result.jpg - 抽奖结果截图
+
+整体来看，这是一个完整的前端抽奖系统，具有良好的用户界面和交互体验。`);
+  });
+
   test("fallback metadata-only output emits friendly result instead of raw wrapper text", async () => {
     const adapter = new IFlowAdapter(
       {

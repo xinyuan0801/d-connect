@@ -32,6 +32,10 @@ const EXECUTION_INFO_BLOCK_PATTERN = /<Execution Info>[\s\S]*?<\/Execution Info>
 const EXECUTION_INFO_TAIL_PATTERN = /<Execution Info>[\s\S]*$/i;
 const EXECUTION_INFO_CAPTURE_PATTERN = /<Execution Info>\s*([\s\S]*?)\s*<\/Execution Info>/gi;
 const AONE_AUTH_LINE_PATTERN = /^using cached .* authentication\.?$/i;
+const RESUMING_SESSION_LINE_PATTERN = /^ℹ(?:️)?\s*resuming session\b.*$/i;
+const RESUMED_SESSION_LINE_PATTERN = /^session-[a-z0-9-]+\s*\(\d+\s+messages loaded\)\s*$/i;
+const SDK_SHUTDOWN_ERROR_BLOCK_PATTERN =
+  /(?:^|\n)\s*Error shutting down SDK:[^\n]*(?:\n\s*at [^\n]*)+(?:\n\s*process\.processTicksAndRejections[^\n]*)*/gi;
 
 function isBootstrapParagraph(value: string): boolean {
   const text = value.trim();
@@ -62,12 +66,18 @@ export function sanitizeIFlowAssistantText(raw: string): string {
   }
 
   let text = raw.replace(/\r/g, "");
+  text = text.replace(SDK_SHUTDOWN_ERROR_BLOCK_PATTERN, "\n");
   text = text.replace(EXECUTION_INFO_BLOCK_PATTERN, "\n");
   text = text.replace(EXECUTION_INFO_TAIL_PATTERN, "\n");
   text = text
     .split("\n")
     .map((line) => line.trim())
-    .filter((line) => !AONE_AUTH_LINE_PATTERN.test(line))
+    .filter(
+      (line) =>
+        !AONE_AUTH_LINE_PATTERN.test(line) &&
+        !RESUMING_SESSION_LINE_PATTERN.test(line) &&
+        !RESUMED_SESSION_LINE_PATTERN.test(line),
+    )
     .join("\n");
 
   const shouldFilterBootstrap =
