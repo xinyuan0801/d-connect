@@ -1,4 +1,5 @@
 import { mkdtemp, mkdir, utimes, writeFile } from "node:fs/promises";
+import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { describe, expect, test, vi } from "vitest";
@@ -10,8 +11,6 @@ import {
   recordToolResults,
   readTranscriptDelta,
   readTranscriptDeltaFromFile,
-  shouldFinishByIdleState,
-  shouldFinishByNoResultState,
   type IFlowPendingToolState,
 } from "../src/adapters/agent/iflow.js";
 import {
@@ -242,7 +241,6 @@ describe("iflow pending tool tracking", () => {
         seenToolUseIds: new Set(),
         completedToolUseIds: new Set(),
         pendingStartedAt: 0,
-        pendingTimeoutMs: adapter.pendingToolTimeoutMs(),
         startedAt: Date.now(),
       };
 
@@ -317,7 +315,6 @@ describe("iflow pending tool tracking", () => {
       seenToolUseIds: new Set(),
       completedToolUseIds: new Set(),
       pendingStartedAt: 0,
-      pendingTimeoutMs: adapter.pendingToolTimeoutMs(),
       startedAt: Date.now(),
       lastToolResultToolName: undefined,
       lastToolResultContent: undefined,
@@ -359,84 +356,6 @@ describe("iflow pending tool tracking", () => {
   "session-id": "session-tail"
 `);
     expect(info?.sessionId).toBe("session-tail");
-  });
-
-  test("waits longer after tool activity before treating the turn as idle", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-07T12:31:09.000Z"));
-
-    expect(
-      shouldFinishByIdleState({
-        resultChunks: ["我来帮你查询杭州今天的天气。"],
-        pendingTools: new Map(),
-        lastActivityAt: Date.now() - 1000,
-        hadToolActivity: true,
-        awaitingPostToolResponse: false,
-      }),
-    ).toBe(false);
-
-    expect(
-      shouldFinishByIdleState({
-        resultChunks: ["我来帮你查询杭州今天的天气。"],
-        pendingTools: new Map(),
-        lastActivityAt: Date.now() - 6000,
-        hadToolActivity: true,
-        awaitingPostToolResponse: false,
-      }),
-    ).toBe(true);
-
-    vi.useRealTimers();
-  });
-
-  test("does not finish idle when still waiting for text after tool execution", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-07T12:31:09.000Z"));
-
-    expect(
-      shouldFinishByIdleState({
-        resultChunks: ["我来帮你查询今天的新闻。"],
-        pendingTools: new Map(),
-        lastActivityAt: Date.now() - 10000,
-        hadToolActivity: true,
-        awaitingPostToolResponse: true,
-      }),
-    ).toBe(false);
-
-    vi.useRealTimers();
-  });
-
-  test("does not trigger no-result timeout after tool activity", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-07T12:31:09.000Z"));
-
-    expect(
-      shouldFinishByNoResultState({
-        resultChunks: [],
-        pendingTools: new Map(),
-        hadToolActivity: true,
-        awaitingPostToolResponse: true,
-        startedAt: Date.now() - 31000,
-      }),
-    ).toBe(false);
-
-    vi.useRealTimers();
-  });
-
-  test("still triggers no-result timeout when nothing was ever emitted", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-07T12:31:09.000Z"));
-
-    expect(
-      shouldFinishByNoResultState({
-        resultChunks: [],
-        pendingTools: new Map(),
-        hadToolActivity: false,
-        awaitingPostToolResponse: false,
-        startedAt: Date.now() - 61000,
-      }),
-    ).toBe(true);
-
-    vi.useRealTimers();
   });
 
   test("preserves assistant content order between text and tool_use", () => {
@@ -564,47 +483,8 @@ How can I assist you today?
     await adapter.stop();
   });
 
-  test("tool timeouts are logged without appending timeout text to the reply", async () => {
+  test("waitForTurnResult keeps polling transcript until child closes", async () => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-08T10:04:44.000Z"));
-
-    const logger = new Logger("error");
-    const warnSpy = vi.spyOn(logger, "warn");
-    const adapter = new IFlowAdapter(
-      {
-        workDir: "/Users/felixwang/Desktop/d-connect",
-      },
-      logger,
-    );
-
-    const session = (await adapter.startSession("session-timeout")) as any;
-    const turn = {
-      resultChunks: ["我来帮你创建这个定时任务。"],
-      pendingTools: new Map([["run_shell_command:0", "run_shell_command"]]),
-      pendingStartedAt: Date.now() - 181000,
-      pendingTimeoutMs: 180000,
-      lastTextAt: 0,
-      lastActivityAt: Date.now() - 181000,
-    };
-
-    expect(session.shouldFinishByToolTimeout(turn)).toBe(true);
-    expect(turn.resultChunks).toEqual(["我来帮你创建这个定时任务。"]);
-    expect(turn.pendingTools.size).toBe(0);
-    expect(turn.pendingStartedAt).toBe(0);
-    expect(warnSpy).toHaveBeenCalledWith("iflow tool execution timed out", {
-      sessionId: "session-timeout",
-      pendingTools: ["run_shell_command"],
-      timeoutMs: 180000,
-      mode: "yolo",
-    });
-
-    await adapter.stop();
-    vi.useRealTimers();
-  });
-
-  test("tool timeout ignores old pending tools when newer transcript activity exists", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-08T10:04:44.000Z"));
 
     const adapter = new IFlowAdapter(
       {
@@ -613,164 +493,38 @@ How can I assist you today?
       new Logger("error"),
     );
 
-    const session = (await adapter.startSession("session-timeout-active")) as any;
-    const turn = {
+    const session = (await adapter.startSession("session-poll-until-close")) as any;
+    const child = new EventEmitter() as EventEmitter & { once: typeof EventEmitter.prototype.once };
+    const loadSpy = vi.fn(async () => {});
+    session.loadNewTranscript = loadSpy;
+
+    const waitPromise = session.waitForTurnResult(child, {
+      transcriptPath: undefined,
+      transcriptBindingSource: undefined,
+      outputFilePath: undefined,
+      offset: 0,
+      partial: "",
+      outputProbe: "",
       resultChunks: [],
-      pendingTools: new Map([["ReadCommandOutput:0", "ReadCommandOutput"]]),
-      pendingStartedAt: Date.now() - 181000,
-      pendingTimeoutMs: 180000,
       lastTextAt: 0,
-      lastActivityAt: Date.now() - 10000,
-    };
-
-    expect(session.shouldFinishByToolTimeout(turn)).toBe(false);
-    expect(turn.pendingTools.size).toBe(1);
-
-    await adapter.stop();
-    vi.useRealTimers();
-  });
-
-  test("task tool timeout waits up to 5 minutes", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-08T10:04:44.000Z"));
-
-    const logger = new Logger("error");
-    const warnSpy = vi.spyOn(logger, "warn");
-    const adapter = new IFlowAdapter(
-      {
-        workDir: "/Users/felixwang/Desktop/d-connect",
-      },
-      logger,
-    );
-
-    const session = (await adapter.startSession("session-task-timeout")) as any;
-    const turn = {
-      resultChunks: [],
-      pendingTools: new Map([["task:0", "task"]]),
-      pendingStartedAt: Date.now() - 181000,
-      pendingTimeoutMs: 180000,
-      lastTextAt: 0,
-      lastActivityAt: Date.now() - 181000,
-    };
-
-    expect(session.shouldFinishByToolTimeout(turn)).toBe(false);
-
-    turn.pendingStartedAt = Date.now() - 301000;
-    turn.lastActivityAt = Date.now() - 301000;
-    expect(session.shouldFinishByToolTimeout(turn)).toBe(true);
-    expect(warnSpy).toHaveBeenCalledWith("iflow tool execution timed out", {
-      sessionId: "session-task-timeout",
-      pendingTools: ["task"],
-      timeoutMs: 300000,
-      mode: "yolo",
-    });
-
-    await adapter.stop();
-    vi.useRealTimers();
-  });
-
-  test("task post-tool response timeout waits up to 5 minutes", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-08T10:04:44.000Z"));
-
-    const adapter = new IFlowAdapter(
-      {
-        workDir: "/Users/felixwang/Desktop/d-connect",
-      },
-      new Logger("error"),
-    );
-
-    const session = (await adapter.startSession("session-task-post-tool-timeout")) as any;
-    const turn = {
-      awaitingPostToolResponse: true,
+      lastActivityAt: Date.now(),
+      lastToolActivityAt: 0,
+      hadToolActivity: false,
+      awaitingPostToolResponse: false,
       pendingTools: new Map(),
-      lastToolActivityAt: Date.now() - 61000,
-      lastToolResultToolName: "task",
-    };
-
-    expect(session.shouldFinishByPostToolResponseTimeout(turn)).toBe(false);
-
-    turn.lastToolActivityAt = Date.now() - 301000;
-    expect(session.shouldFinishByPostToolResponseTimeout(turn)).toBe(true);
-
-    await adapter.stop();
-    vi.useRealTimers();
-  });
-
-  test("hard timeout waits for transcript inactivity instead of total turn age", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-08T10:04:44.000Z"));
-
-    const adapter = new IFlowAdapter(
-      {
-        workDir: "/Users/felixwang/Desktop/d-connect",
-      },
-      new Logger("error"),
-    );
-
-    const session = (await adapter.startSession("session-hard-timeout")) as any;
-    const activeTurn = {
-      resultChunks: [],
-      pendingTools: new Map([["call_read:0", "ReadCommandOutput"]]),
-      pendingStartedAt: Date.now() - 180000,
-      pendingTimeoutMs: 180000,
-      lastTextAt: 0,
-      lastActivityAt: Date.now() - 10000,
-      startedAt: Date.now() - 121000,
-    };
-
-    expect(session.shouldFinishByHardTimeout(activeTurn)).toBe(false);
-    expect(activeTurn.resultChunks).toEqual([]);
-
-    const stalledTurn = {
-      ...activeTurn,
-      pendingTools: new Map([["call_read:0", "ReadCommandOutput"]]),
-      resultChunks: [],
-      lastActivityAt: Date.now() - 121000,
-    };
-
-    expect(session.shouldFinishByHardTimeout(stalledTurn)).toBe(true);
-    expect(stalledTurn.resultChunks).toEqual(["iflow turn timeout"]);
-    expect(stalledTurn.pendingTools.size).toBe(0);
-
-    await adapter.stop();
-    vi.useRealTimers();
-  });
-
-  test("task hard timeout waits up to 5 minutes while awaiting final reply", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-08T10:04:44.000Z"));
-
-    const adapter = new IFlowAdapter(
-      {
-        workDir: "/Users/felixwang/Desktop/d-connect",
-      },
-      new Logger("error"),
-    );
-
-    const session = (await adapter.startSession("session-task-hard-timeout")) as any;
-    const activeTurn = {
-      resultChunks: [],
-      pendingTools: new Map(),
-      awaitingPostToolResponse: true,
-      lastToolResultToolName: "task",
+      seenToolUseIds: new Set(),
+      completedToolUseIds: new Set(),
       pendingStartedAt: 0,
-      pendingTimeoutMs: 180000,
-      lastTextAt: 0,
-      lastActivityAt: Date.now() - 121000,
-      startedAt: Date.now() - 301000,
-    };
+      startedAt: Date.now(),
+      lastToolResultToolName: undefined,
+      lastToolResultContent: undefined,
+    });
 
-    expect(session.shouldFinishByHardTimeout(activeTurn)).toBe(false);
+    await vi.advanceTimersByTimeAsync(650);
+    expect(loadSpy).toHaveBeenCalledTimes(4);
 
-    const stalledTurn = {
-      ...activeTurn,
-      resultChunks: [],
-      lastActivityAt: Date.now() - 301000,
-    };
-
-    expect(session.shouldFinishByHardTimeout(stalledTurn)).toBe(true);
-    expect(stalledTurn.resultChunks).toEqual(["iflow turn timeout"]);
+    child.emit("close", 0, null);
+    await expect(waitPromise).resolves.toEqual({ code: 0, signal: null });
 
     await adapter.stop();
     vi.useRealTimers();

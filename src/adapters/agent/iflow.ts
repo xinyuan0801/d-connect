@@ -26,14 +26,6 @@ import {
 } from "./iflow-transcript.js";
 
 const TRANSCRIPT_POLL_MS = 200;
-const TURN_IDLE_MS = 900;
-const TURN_IDLE_AFTER_TOOL_MS = 5000;
-const TURN_POST_TOOL_RESPONSE_TIMEOUT_MS = 60000;
-const PENDING_TOOL_TIMEOUT_MS = 180000;
-const TURN_HARD_TIMEOUT_MS = 120000;
-const TURN_NO_RESULT_TIMEOUT_MS = 60000;
-const TASK_TOOL_NAME = "task";
-const TASK_TOOL_TIMEOUT_MS = 300000;
 const TRANSCRIPT_READ_MAX_BYTES_PER_POLL = 256 * 1024;
 const PROCESS_OUTPUT_PROBE_MAX_LEN = 20000;
 const IFLOW_OUTPUT_FILE_ROOT = "d-connect-iflow-output";
@@ -91,7 +83,6 @@ interface TurnState {
   seenToolUseIds: Set<string>;
   completedToolUseIds: Set<string>;
   pendingStartedAt: number;
-  pendingTimeoutMs: number;
   startedAt: number;
   lastToolResultToolName?: string;
   lastToolResultContent?: string;
@@ -310,45 +301,6 @@ export async function readTranscriptDeltaFromFile(
   } finally {
     await handle.close();
   }
-}
-
-export function shouldFinishByIdleState(state: {
-  resultChunks: string[];
-  pendingTools: Map<string, string>;
-  lastActivityAt: number;
-  hadToolActivity: boolean;
-  awaitingPostToolResponse: boolean;
-}): boolean {
-  if (state.resultChunks.length === 0) {
-    return false;
-  }
-  if (state.pendingTools.size > 0) {
-    return false;
-  }
-  if (state.awaitingPostToolResponse) {
-    return false;
-  }
-  const idleMs = state.hadToolActivity ? TURN_IDLE_AFTER_TOOL_MS : TURN_IDLE_MS;
-  return Date.now() - state.lastActivityAt >= idleMs;
-}
-
-export function shouldFinishByNoResultState(
-  state: {
-    resultChunks: string[];
-    pendingTools: Map<string, string>;
-    hadToolActivity: boolean;
-    awaitingPostToolResponse: boolean;
-    startedAt: number;
-  },
-  now = Date.now(),
-): boolean {
-  if (state.resultChunks.length > 0 || state.pendingTools.size > 0) {
-    return false;
-  }
-  if (state.hadToolActivity || state.awaitingPostToolResponse) {
-    return false;
-  }
-  return now - state.startedAt >= TURN_NO_RESULT_TIMEOUT_MS;
 }
 
 function safeJsonParse<T>(line: string): T | null {
@@ -660,66 +612,6 @@ class IFlowSession extends EventEmitter implements AgentSession {
     }
   }
 
-  private shouldFinishByIdle(turn: TurnState): boolean {
-    return shouldFinishByIdleState(turn);
-  }
-
-  private shouldFinishByToolTimeout(turn: TurnState): boolean {
-    if (turn.pendingTools.size === 0 || turn.pendingStartedAt === 0) {
-      return false;
-    }
-    const timeoutMs = this.pendingToolTimeoutMs(turn);
-    const latestActivityAt = Math.max(turn.pendingStartedAt, turn.lastActivityAt);
-    if (Date.now() - latestActivityAt < timeoutMs) {
-      return false;
-    }
-
-    const names = [...new Set(turn.pendingTools.values())].filter(Boolean);
-    this.adapter.logger.warn("iflow tool execution timed out", {
-      sessionId: this.currentSessionId(),
-      pendingTools: names,
-      timeoutMs,
-      mode: this.adapter.getMode(),
-    });
-    turn.pendingTools.clear();
-    turn.pendingStartedAt = 0;
-    turn.lastTextAt = Date.now();
-    return true;
-  }
-
-  private shouldFinishByPostToolResponseTimeout(turn: TurnState): boolean {
-    if (!turn.awaitingPostToolResponse || turn.pendingTools.size > 0 || turn.lastToolActivityAt === 0) {
-      return false;
-    }
-    if (Date.now() - turn.lastToolActivityAt < this.postToolResponseTimeoutMs(turn)) {
-      return false;
-    }
-    return true;
-  }
-
-  private shouldFinishByNoResultTimeout(turn: TurnState): boolean {
-    if (!shouldFinishByNoResultState(turn)) {
-      return false;
-    }
-    turn.resultChunks.push("iflow did not produce transcript output in time");
-    turn.lastTextAt = Date.now();
-    return true;
-  }
-
-  private shouldFinishByHardTimeout(turn: TurnState): boolean {
-    const latestActivityAt = Math.max(turn.startedAt, turn.lastActivityAt);
-    if (Date.now() - latestActivityAt < this.hardTimeoutMs(turn)) {
-      return false;
-    }
-    if (turn.resultChunks.length === 0) {
-      turn.resultChunks.push("iflow turn timeout");
-    }
-    turn.pendingTools.clear();
-    turn.pendingStartedAt = 0;
-    turn.lastTextAt = Date.now();
-    return true;
-  }
-
   private buildPostToolFallback(turn: TurnState): string {
     const backgroundTaskId =
       turn.lastToolResultToolName === "run_shell_command"
@@ -731,26 +623,6 @@ class IFlowSession extends EventEmitter implements AgentSession {
     return "iflow 在工具执行后结束了当前轮次，但没有产出最终回复；已保留底层续聊状态。";
   }
 
-  private pendingToolTimeoutMs(turn: Pick<TurnState, "pendingTools" | "pendingTimeoutMs">): number {
-    if ([...turn.pendingTools.values()].includes(TASK_TOOL_NAME)) {
-      return Math.max(turn.pendingTimeoutMs, TASK_TOOL_TIMEOUT_MS);
-    }
-    return turn.pendingTimeoutMs;
-  }
-
-  private postToolResponseTimeoutMs(turn: Pick<TurnState, "lastToolResultToolName">): number {
-    return turn.lastToolResultToolName === TASK_TOOL_NAME ? TASK_TOOL_TIMEOUT_MS : TURN_POST_TOOL_RESPONSE_TIMEOUT_MS;
-  }
-
-  private hardTimeoutMs(
-    turn: Pick<TurnState, "pendingTools" | "awaitingPostToolResponse" | "lastToolResultToolName">,
-  ): number {
-    const waitingOnTask =
-      [...turn.pendingTools.values()].includes(TASK_TOOL_NAME) ||
-      (turn.awaitingPostToolResponse && turn.lastToolResultToolName === TASK_TOOL_NAME);
-    return waitingOnTask ? Math.max(TURN_HARD_TIMEOUT_MS, TASK_TOOL_TIMEOUT_MS) : TURN_HARD_TIMEOUT_MS;
-  }
-
   private async waitForTurnResult(child: ReturnType<typeof spawn>, turn: TurnState): Promise<SpawnResult> {
     const closePromise = new Promise<SpawnResult>((resolve) => {
       child.once("close", (code, signal) => {
@@ -758,62 +630,43 @@ class IFlowSession extends EventEmitter implements AgentSession {
       });
     });
 
-    let polling = false;
-
-    const finishPromise = new Promise<"idle" | "timeout" | "no-result-timeout" | "hard-timeout">((resolve) => {
-      const timer = setInterval(async () => {
-        if (polling) {
-          return;
-        }
-        polling = true;
-        try {
-          await this.loadNewTranscript(turn);
-          if (this.shouldFinishByToolTimeout(turn)) {
-            clearInterval(timer);
-            resolve("timeout");
-            return;
-          }
-          if (this.shouldFinishByPostToolResponseTimeout(turn)) {
-            clearInterval(timer);
-            resolve("no-result-timeout");
-            return;
-          }
-          if (this.shouldFinishByNoResultTimeout(turn)) {
-            clearInterval(timer);
-            resolve("no-result-timeout");
-            return;
-          }
-          if (this.shouldFinishByHardTimeout(turn)) {
-            clearInterval(timer);
-            resolve("hard-timeout");
-            return;
-          }
-          if (this.shouldFinishByIdle(turn)) {
-            clearInterval(timer);
-            resolve("idle");
-          }
-        } finally {
-          polling = false;
-        }
-      }, TRANSCRIPT_POLL_MS);
+    let stopped = false;
+    let rejectPollingError: ((error: unknown) => void) | undefined;
+    const pollingError = new Promise<never>((_, reject) => {
+      rejectPollingError = reject;
     });
+    let polling = Promise.resolve();
 
-    const closeOutcome: Promise<["closed", SpawnResult]> = closePromise.then((res) => ["closed", res] as const);
-    const finishOutcome: Promise<["finished", "idle" | "timeout" | "no-result-timeout" | "hard-timeout"]> = finishPromise.then(
-      (kind) => ["finished", kind] as const,
-    );
-    const outcome = await Promise.race([closeOutcome, finishOutcome]);
+    const queuePoll = (): void => {
+      if (stopped) {
+        return;
+      }
+      polling = polling
+        .then(async () => {
+          if (stopped) {
+            return;
+          }
+          await this.loadNewTranscript(turn);
+        })
+        .catch((error) => {
+          stopped = true;
+          rejectPollingError?.(error);
+        });
+    };
 
-    if (outcome[0] === "finished") {
-      child.kill("SIGTERM");
-      const closed = await Promise.race([
-        closePromise,
-        new Promise<SpawnResult>((resolve) => setTimeout(() => resolve({ code: 0, signal: "SIGTERM" }), 3000)),
-      ]);
-      return closed;
+    queuePoll();
+    const timer = setInterval(queuePoll, TRANSCRIPT_POLL_MS);
+
+    try {
+      const result = await Promise.race([closePromise, pollingError]);
+      stopped = true;
+      clearInterval(timer);
+      await polling.catch(() => undefined);
+      return result;
+    } finally {
+      stopped = true;
+      clearInterval(timer);
     }
-
-    return outcome[1];
   }
 
   private async runSingleTurn(
@@ -894,7 +747,6 @@ class IFlowSession extends EventEmitter implements AgentSession {
         seenToolUseIds: new Set(),
         completedToolUseIds: new Set(),
         pendingStartedAt: 0,
-        pendingTimeoutMs: this.adapter.pendingToolTimeoutMs(),
         startedAt: Date.now(),
         lastToolResultToolName: undefined,
         lastToolResultContent: undefined,
@@ -1065,10 +917,6 @@ export class IFlowAdapter implements AgentAdapter, ModelSwitchable {
 
     args.push("-p", prompt);
     return args;
-  }
-
-  pendingToolTimeoutMs(): number {
-    return PENDING_TOOL_TIMEOUT_MS;
   }
 
   spawnEnv(): NodeJS.ProcessEnv {
