@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { bootstrapConfig, fileExists, loadConfig, normalizeConfig, resolveConfigPath } from "../config/index.js";
+import type { ResolvedAppConfig } from "../config/index.js";
 import { Logger } from "../infra/logging/logger.js";
 import { createLoopStore, LoopScheduler } from "../scheduler/loop.js";
 import { RuntimeEngine } from "../runtime/engine.js";
@@ -9,6 +10,50 @@ import { ensureSocketAvailable, IpcServer } from "../ipc/server.js";
 
 export interface StartAppOptions {
   explicitConfigPath?: string;
+}
+
+export interface AllowAllWarningTarget {
+  projectName: string;
+  platformType: string;
+}
+
+export function findAllowAllWarningTargets(config: ResolvedAppConfig): AllowAllWarningTarget[] {
+  return config.projects.flatMap((project) =>
+    project.platforms.flatMap((platform) => {
+      if (platform.options.allowFrom.trim() !== "*") {
+        return [];
+      }
+      return [
+        {
+          projectName: project.name,
+          platformType: platform.type,
+        },
+      ];
+    }),
+  );
+}
+
+export function formatAllowAllWarning(targets: AllowAllWarningTarget[]): string | undefined {
+  if (targets.length === 0) {
+    return undefined;
+  }
+
+  const exposedTargets = targets.map((target) => `  - ${target.projectName} / ${target.platformType}`).join("\n");
+  return [
+    "",
+    " __        ___    ____  _   _ ___ _   _  ____ ",
+    " \\ \\      / / \\  |  _ \\| \\ | |_ _| \\ | |/ ___|",
+    "  \\ \\ /\\ / / _ \\ | |_) |  \\| || ||  \\| | |  _ ",
+    "   \\ V  V / ___ \\|  _ <| |\\  || || |\\  | |_| |",
+    "    \\_/\\_/_/   \\_\\_| \\_\\_| \\_|___|_| \\_|\\____|",
+    "",
+    "allowFrom = \"*\" exposes your bot to every reachable user.",
+    "Restrict platform.options.allowFrom before using this daemon in shared chats.",
+    "",
+    "Exposed targets:",
+    exposedTargets,
+    "",
+  ].join("\n");
 }
 
 export async function resolveAndLoadConfig(explicitConfigPath?: string) {
@@ -40,6 +85,14 @@ export async function startDaemon(options: StartAppOptions = {}): Promise<void> 
   await Logger.configureFile(logPath);
 
   const logger = new Logger(config.log.level).child("d-connect");
+  const allowAllWarningTargets = findAllowAllWarningTargets(config);
+  const allowAllWarning = formatAllowAllWarning(allowAllWarningTargets);
+  if (allowAllWarning) {
+    console.warn(allowAllWarning);
+    logger.warn("allowFrom wildcard detected", {
+      targets: allowAllWarningTargets.map((target) => `${target.projectName}/${target.platformType}`),
+    });
+  }
   logger.info("starting", { configPath, dataDir: config.dataDir, logPath });
 
   const loopStore = await createLoopStore(config.dataDir);

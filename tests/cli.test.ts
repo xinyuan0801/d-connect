@@ -108,3 +108,20 @@ describe("cli restart command", () => {
     killSpy.mockRestore();
   });
 });
+
+describe("cli start command", () => {
+  const configPath = process.platform === "win32" ? "C:\\tmp\\config.json" : "/tmp/config.json";
+
+  beforeEach(() => {
+    mockState.startDaemon.mockReset();
+    mockState.startDaemon.mockResolvedValue(undefined);
+  });
+
+  test("starts daemon with explicit config path", async () => {
+    await createCliProgram().parseAsync(["node", "d-connect", "start", "-c", configPath]);
+
+    expect(mockState.startDaemon).toHaveBeenCalledWith({
+      explicitConfigPath: configPath,
+    });
+  });
+});
