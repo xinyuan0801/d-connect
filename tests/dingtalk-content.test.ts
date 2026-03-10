@@ -1,5 +1,9 @@
 import { describe, expect, test } from "vitest";
-import { buildDingTalkReplyPayload } from "../src/adapters/platform/dingtalk-content.js";
+import {
+  buildDingTalkCardSchemaContent,
+  buildDingTalkReplyPayload,
+  buildDingTalkRobotSendPayload,
+} from "../src/adapters/platform/dingtalk-content.js";
 
 describe("dingtalk content", () => {
   test("buildDingTalkReplyPayload keeps plain text replies as text", () => {
@@ -58,6 +62,71 @@ describe("dingtalk content", () => {
         title: "🛠️ run_shell_command",
         text: "🛠️ run_shell_command\n```json\nprintf '`hello`'\n```",
       },
+    });
+  });
+
+  test("buildDingTalkRobotSendPayload uses the sampleText template for plain text", () => {
+    expect(buildDingTalkRobotSendPayload("plain text")).toEqual({
+      msgKey: "sampleText",
+      msgParam: JSON.stringify({
+        content: "plain text",
+      }),
+    });
+  });
+
+  test("buildDingTalkRobotSendPayload uses the sampleMarkdown template for markdown", () => {
+    expect(buildDingTalkRobotSendPayload("## Title\n- item")).toEqual({
+      msgKey: "sampleMarkdown",
+      msgParam: JSON.stringify({
+        title: "Title",
+        text: "## Title\n- item",
+      }),
+    });
+  });
+
+  test("buildDingTalkRobotSendPayload preserves tool status markdown formatting", () => {
+    expect(buildDingTalkRobotSendPayload("🛠️ Agent\n`Explore | Explore codebase structure`")).toEqual({
+      msgKey: "sampleMarkdown",
+      msgParam: JSON.stringify({
+        title: "🛠️ Agent",
+        text: "🛠️ Agent\n```json\nExplore | Explore codebase structure\n```",
+      }),
+    });
+  });
+
+  test("buildDingTalkCardSchemaContent renders plain text into a basic card schema", () => {
+    expect(JSON.parse(buildDingTalkCardSchemaContent("plain text"))).toEqual({
+      header: {
+        title: {
+          type: "text",
+          text: "plain text",
+        },
+      },
+      contents: [
+        {
+          type: "text",
+          text: "plain text",
+          id: "body",
+        },
+      ],
+    });
+  });
+
+  test("buildDingTalkCardSchemaContent keeps markdown content in the card body", () => {
+    expect(JSON.parse(buildDingTalkCardSchemaContent("## Title\n- item"))).toEqual({
+      header: {
+        title: {
+          type: "text",
+          text: "Title",
+        },
+      },
+      contents: [
+        {
+          type: "text",
+          text: "## Title\n- item",
+          id: "body",
+        },
+      ],
     });
   });
 });

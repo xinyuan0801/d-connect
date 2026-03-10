@@ -11,6 +11,8 @@ export interface DeliveryTarget {
   payload: JsonObject;
 }
 
+export type LoopContextMode = "isolated" | "shared";
+
 export interface InboundMessage {
   sessionKey: string;
   platform: string;
@@ -92,6 +94,7 @@ export interface LoopJob {
   scheduleExpr: string;
   prompt: string;
   description: string;
+  contextMode?: LoopContextMode;
   enabled: boolean;
   silent?: boolean;
   createdAt: string;

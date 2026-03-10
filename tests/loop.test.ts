@@ -40,6 +40,7 @@ describe("loop scheduler", () => {
     expect(executor.calls).toHaveLength(1);
     expect(executor.calls[0]?.project).toBe("demo");
     expect(executor.calls[0]?.sessionKey).toBe("s-user");
+    expect(executor.calls[0]?.contextMode).toBe("isolated");
 
     const removed = await scheduler.removeJob(job.id);
     expect(removed).toBe(true);

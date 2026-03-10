@@ -41,6 +41,13 @@ function isSlashCommandMessage(content: string): boolean {
   return content.trim().startsWith("/");
 }
 
+function resolveLoopExecutionSessionKey(job: LoopJob): string {
+  if (job.contextMode === "shared") {
+    return job.sessionKey;
+  }
+  return `loop:${job.id}`;
+}
+
 export class DaemonRuntime implements JobExecutor {
   private readonly registry: ProjectRegistry;
   private readonly relay = new MessageRelay();
@@ -263,7 +270,7 @@ export class DaemonRuntime implements JobExecutor {
   async executeJob(job: LoopJob): Promise<void> {
     const result = await this.dispatch({
       project: job.project,
-      sessionKey: job.sessionKey,
+      sessionKey: resolveLoopExecutionSessionKey(job),
       content: job.prompt,
       userId: "loop",
       userName: "loop",

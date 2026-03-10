@@ -10,7 +10,7 @@ import {
 import type { DeliveryTarget, InboundMessage, MessageHandler, PlatformAdapter } from "../../core/types.js";
 import { writeJsonAtomic } from "../../infra/store-json/atomic.js";
 import { Logger } from "../../logging.js";
-import { buildDingTalkReplyPayload } from "./dingtalk-content.js";
+import { buildDingTalkReplyPayload, buildDingTalkRobotSendPayload } from "./dingtalk-content.js";
 import { parseAllowList } from "./shared/allow-list.js";
 import { createDeliveryTarget } from "./shared/delivery-target.js";
 
@@ -31,6 +31,8 @@ const DIRECT_CONVERSATION_TYPE = "1";
 const DINGTALK_OAUTH_ACCESS_TOKEN_URL = "https://api.dingtalk.com/v1.0/oauth2/accessToken";
 const DINGTALK_MEDIA_DOWNLOAD_URL = "https://api.dingtalk.com/v1.0/robot/messageFiles/download";
 const DINGTALK_API_BASE = "https://api.dingtalk.com";
+const DINGTALK_ROBOT_GROUP_SEND_URL = `${DINGTALK_API_BASE}/v1.0/robot/groupMessages/send`;
+const DINGTALK_ROBOT_DIRECT_SEND_URL = `${DINGTALK_API_BASE}/v1.0/robot/oToMessages/batchSend`;
 const DINGTALK_OAPI_BASE = "https://oapi.dingtalk.com";
 const DEFAULT_INBOUND_MEDIA_DIR = join(tmpdir(), "d-connect", "dingtalk-media");
 
@@ -110,6 +112,13 @@ interface DingTalkInboundMessage {
     quoteContent?: string;
     richText?: DingTalkRichTextPart[];
   };
+}
+
+interface DingTalkActiveSendTarget {
+  openConversationId?: string;
+  conversationType?: string;
+  robotCode?: string;
+  userId?: string;
 }
 
 interface ParsedMediaAttachment {
@@ -694,6 +703,29 @@ export class DingTalkAdapter implements PlatformAdapter {
     if (typeof sessionWebhookExpiredTime === "number" && sessionWebhookExpiredTime > 0 && sessionWebhookExpiredTime <= Date.now()) {
       throw new Error("dingtalk sessionWebhook expired; wait for a fresh DingTalk message to refresh the delivery target");
     }
+  }
+
+  private hasFreshWebhook(sessionWebhook: string, sessionWebhookExpiredTime?: number): boolean {
+    return !!sessionWebhook
+      && (sessionWebhookExpiredTime === undefined || sessionWebhookExpiredTime <= 0 || sessionWebhookExpiredTime > Date.now());
+  }
+
+  private extractActiveSendTarget(payload: DeliveryTarget["payload"]): DingTalkActiveSendTarget {
+    const openConversationId = typeof payload.openConversationId === "string"
+      ? payload.openConversationId.trim()
+      : typeof payload.conversationId === "string"
+        ? payload.conversationId.trim()
+        : "";
+    const conversationType = typeof payload.conversationType === "string" ? payload.conversationType.trim() : "";
+    const robotCode = typeof payload.robotCode === "string" ? payload.robotCode.trim() : "";
+    const userId = typeof payload.userId === "string" ? payload.userId.trim() : "";
+
+    return {
+      ...(openConversationId ? { openConversationId } : {}),
+      ...(conversationType ? { conversationType } : {}),
+      ...(robotCode ? { robotCode } : {}),
+      ...(userId ? { userId } : {}),
+    };
   }
 
   private async fetchWithTimeout(url: string, init: RequestInit, timeoutMs = MEDIA_DOWNLOAD_TIMEOUT_MS): Promise<Response> {
@@ -1462,18 +1494,21 @@ export class DingTalkAdapter implements PlatformAdapter {
       const sessionWebhookExpiredTime = typeof raw.sessionWebhookExpiredTime === "number"
         ? raw.sessionWebhookExpiredTime
         : undefined;
-      const hasFreshWebhook =
-        !!sessionWebhook
-        && (sessionWebhookExpiredTime === undefined || sessionWebhookExpiredTime <= 0 || sessionWebhookExpiredTime > Date.now());
+      const hasFreshWebhook = this.hasFreshWebhook(sessionWebhook ?? "", sessionWebhookExpiredTime);
 
-      const deliveryTarget = hasFreshWebhook && sessionWebhook
-        ? createDeliveryTarget(this.name, {
-            sessionWebhook,
-            ...(sessionWebhookExpiredTime === undefined ? {} : { sessionWebhookExpiredTime }),
-            conversationId: raw.conversationId,
-            senderId: userId,
-          })
-        : undefined;
+      const deliveryTarget = createDeliveryTarget(this.name, {
+        openConversationId: raw.conversationId,
+        conversationId: raw.conversationId,
+        ...(raw.conversationType ? { conversationType: raw.conversationType } : {}),
+        ...(raw.robotCode?.trim() ? { robotCode: raw.robotCode.trim() } : {}),
+        ...(userId ? { userId } : {}),
+        ...(hasFreshWebhook && sessionWebhook
+          ? {
+              sessionWebhook,
+              ...(sessionWebhookExpiredTime === undefined ? {} : { sessionWebhookExpiredTime }),
+            }
+          : {}),
+      });
 
       if (raw.sessionWebhook && !hasFreshWebhook) {
         this.logger.debug("skip expired dingtalk delivery target", {
@@ -1573,6 +1608,57 @@ export class DingTalkAdapter implements PlatformAdapter {
     }
   }
 
+  private async sendViaRobotApi(target: DingTalkActiveSendTarget, content: string): Promise<void> {
+    const accessToken = await this.getAccessToken();
+    const robotCode = target.robotCode || this.options.clientId;
+    const proactivePayload = buildDingTalkRobotSendPayload(content);
+    const isDirectConversation = target.conversationType === DIRECT_CONVERSATION_TYPE;
+    let url = DINGTALK_ROBOT_GROUP_SEND_URL;
+    let requestBody: Record<string, unknown>;
+
+    if (isDirectConversation) {
+      if (!target.userId) {
+        throw new Error("missing userId in dingtalk delivery target for direct proactive send");
+      }
+
+      url = DINGTALK_ROBOT_DIRECT_SEND_URL;
+      requestBody = {
+        robotCode,
+        msgKey: proactivePayload.msgKey,
+        msgParam: proactivePayload.msgParam,
+        userIds: [target.userId],
+      };
+    } else {
+      if (!target.openConversationId) {
+        throw new Error("missing openConversationId in dingtalk delivery target for group proactive send");
+      }
+
+      requestBody = {
+        robotCode,
+        msgKey: proactivePayload.msgKey,
+        msgParam: proactivePayload.msgParam,
+        openConversationId: target.openConversationId,
+      };
+    }
+
+    const res = await this.fetchWithTimeout(
+      url,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-acs-dingtalk-access-token": accessToken,
+        },
+        body: JSON.stringify(requestBody),
+      },
+    );
+
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`dingtalk robot send failed: ${res.status} ${body}`);
+    }
+  }
+
   async reply(replyCtx: unknown, content: string): Promise<void> {
     const ctx = replyCtx as DingTalkReplyContext;
     await this.sendViaWebhook(ctx?.sessionWebhook ?? "", content, ctx?.sessionWebhookExpiredTime);
@@ -1582,6 +1668,12 @@ export class DingTalkAdapter implements PlatformAdapter {
     const sessionWebhook = typeof target.payload.sessionWebhook === "string" ? target.payload.sessionWebhook : "";
     const sessionWebhookExpiredTime =
       typeof target.payload.sessionWebhookExpiredTime === "number" ? target.payload.sessionWebhookExpiredTime : undefined;
+    const activeTarget = this.extractActiveSendTarget(target.payload);
+    if (activeTarget.openConversationId || activeTarget.userId) {
+      await this.sendViaRobotApi(activeTarget, content);
+      return;
+    }
+
     await this.sendViaWebhook(sessionWebhook, content, sessionWebhookExpiredTime);
   }
 

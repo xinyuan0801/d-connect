@@ -249,6 +249,106 @@ describe("runtime integration", () => {
     await restarted.stop();
   });
 
+  test("runs loop jobs in isolated agent sessions by default while reusing the original delivery target", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "d-connect-runtime-"));
+    const config = {
+      configVersion: 1,
+      dataDir,
+      log: { level: "error" as const },
+      loop: { silent: false },
+      projects: [
+        {
+          name: "demo",
+          agent: {
+            type: "claudecode" as const,
+            options: {
+              cmd: "fake",
+            },
+          },
+          platforms: [
+            {
+              type: "feishu" as const,
+              options: {
+                appId: "app-id",
+                appSecret: "app-secret",
+                allowFrom: "*",
+                groupReplyAll: false,
+                reactionEmoji: "none",
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const loopStore = await createLoopStore(dataDir);
+    const loopScheduler = new LoopScheduler(loopStore, new Logger("error"));
+    const runtime = new RuntimeEngine(config, new Logger("error"), loopScheduler);
+    await runtime.start();
+
+    const platform = mockState.platformInstances[0] as FakePlatform | undefined;
+    const agent = mockState.agentInstances[0] as FakeAgent | undefined;
+
+    await platform?.deliver({
+      platform: "feishu",
+      sessionKey: "feishu:chat-1:user-1",
+      userId: "user-1",
+      userName: "User 1",
+      content: "ping",
+      replyContext: {
+        messageId: "om_1",
+        chatId: "chat-1",
+      },
+      deliveryTarget: {
+        platform: "feishu",
+        payload: {
+          chatId: "chat-1",
+        },
+      },
+    });
+
+    expect(agent?.sessions).toHaveLength(1);
+    expect(agent?.sessions[0]?.prompts).toEqual(["ping"]);
+
+    await runtime.executeJob({
+      id: "job-isolated",
+      project: "demo",
+      sessionKey: "feishu:chat-1:user-1",
+      scheduleExpr: "* * * * * *",
+      prompt: "status",
+      description: "test",
+      enabled: true,
+      createdAt: new Date().toISOString(),
+      silent: false,
+    });
+
+    expect(agent?.sessions).toHaveLength(2);
+    expect(agent?.sessions[0]?.prompts).toEqual(["ping"]);
+    expect(agent?.sessions[1]?.prompts).toEqual(["status"]);
+    expect(platform?.sends).toEqual([
+      {
+        target: {
+          platform: "feishu",
+          payload: {
+            chatId: "chat-1",
+          },
+        },
+        content: "echo:status",
+      },
+      {
+        target: {
+          platform: "feishu",
+          payload: {
+            chatId: "chat-1",
+          },
+        },
+        content: "done:status",
+      },
+    ]);
+
+    await runtime.stop();
+  });
+
   test("routes natural language /loop requests into agent prompts", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "d-connect-runtime-"));
     const configPath = "/tmp/d-connect/runtime-config.json";

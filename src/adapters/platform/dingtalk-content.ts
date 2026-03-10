@@ -14,6 +14,27 @@ interface DingTalkReplyPayload {
   };
 }
 
+interface DingTalkRobotSendPayload {
+  msgKey: "sampleText" | "sampleMarkdown";
+  msgParam: string;
+}
+
+interface DingTalkCardTextBlock {
+  type: "text";
+  text: string;
+  id: string;
+}
+
+interface DingTalkCardSchemaContent {
+  header: {
+    title: {
+      type: "text";
+      text: string;
+    };
+  };
+  contents: DingTalkCardTextBlock[];
+}
+
 function containsMarkdownTable(input: string): boolean {
   for (const line of input.split("\n")) {
     const trimmed = line.trim();
@@ -125,4 +146,46 @@ export function buildDingTalkReplyPayload(content: string): DingTalkReplyPayload
       text: content,
     },
   };
+}
+
+export function buildDingTalkRobotSendPayload(content: string): DingTalkRobotSendPayload {
+  const payload = buildDingTalkReplyPayload(content);
+
+  if (payload.msgtype === "markdown" && payload.markdown) {
+    return {
+      msgKey: "sampleMarkdown",
+      msgParam: JSON.stringify({
+        title: payload.markdown.title,
+        text: payload.markdown.text,
+      }),
+    };
+  }
+
+  return {
+    msgKey: "sampleText",
+    msgParam: JSON.stringify({
+      content: payload.text?.content ?? content,
+    }),
+  };
+}
+
+export function buildDingTalkCardSchemaContent(content: string): string {
+  const normalizedContent = content.trim().length > 0 ? content : " ";
+  const schema: DingTalkCardSchemaContent = {
+    header: {
+      title: {
+        type: "text",
+        text: normalizeMarkdownTitle(normalizedContent),
+      },
+    },
+    contents: [
+      {
+        type: "text",
+        text: normalizedContent,
+        id: "body",
+      },
+    ],
+  };
+
+  return JSON.stringify(schema);
 }

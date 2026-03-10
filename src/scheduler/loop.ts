@@ -3,11 +3,15 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import cron from "node-cron";
 import { writeJsonAtomic, ensureDir } from "../infra/store-json/atomic.js";
-import type { LoopJob, JobExecutor } from "../core/types.js";
+import type { LoopContextMode, LoopJob, JobExecutor } from "../core/types.js";
 import { Logger } from "../logging.js";
 
 interface LoopSnapshot {
   jobs: LoopJob[];
+}
+
+function normalizeLoopContextMode(mode?: LoopContextMode): LoopContextMode {
+  return mode === "shared" ? "shared" : "isolated";
 }
 
 export class LoopStore {
@@ -21,7 +25,10 @@ export class LoopStore {
       const parsed = JSON.parse(raw) as LoopSnapshot;
       this.jobs.clear();
       for (const job of parsed.jobs ?? []) {
-        this.jobs.set(job.id, job);
+        this.jobs.set(job.id, {
+          ...job,
+          contextMode: normalizeLoopContextMode(job.contextMode),
+        });
       }
     } catch {
       // ignore empty
@@ -115,13 +122,14 @@ export class LoopScheduler {
     this.tasks.set(job.id, task);
   }
 
-  async addJob(input: Omit<LoopJob, "id" | "createdAt" | "enabled">): Promise<LoopJob> {
+  async addJob(input: Omit<LoopJob, "id" | "createdAt" | "enabled" | "contextMode"> & { contextMode?: LoopContextMode }): Promise<LoopJob> {
     if (!cron.validate(input.scheduleExpr)) {
       throw new Error(`invalid schedule expression: ${input.scheduleExpr}`);
     }
 
     const job: LoopJob = {
       ...input,
+      contextMode: normalizeLoopContextMode(input.contextMode),
       id: randomBytes(4).toString("hex"),
       enabled: true,
       createdAt: new Date().toISOString(),

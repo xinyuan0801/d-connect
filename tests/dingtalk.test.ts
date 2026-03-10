@@ -127,8 +127,13 @@ describe("dingtalk adapter", () => {
         deliveryTarget: {
           platform: "dingtalk",
           payload: expect.objectContaining({
+            openConversationId: "cid",
+            conversationId: "cid",
+            conversationType: "2",
+            robotCode: "robot-code",
             sessionWebhook: "https://example.com/webhook",
             sessionWebhookExpiredTime: expect.any(Number),
+            userId: "staff-1",
           }),
         },
         replyContext: expect.objectContaining({
@@ -906,7 +911,7 @@ describe("dingtalk adapter", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  test("onDownstream does not persist expired delivery targets", () => {
+  test("onDownstream persists openConversationId even when sessionWebhook is expired", () => {
     const adapter = createAdapter();
     const handler = vi.fn();
 
@@ -923,7 +928,16 @@ describe("dingtalk adapter", () => {
 
     expect(handler).toHaveBeenCalledWith(
       expect.objectContaining({
-        deliveryTarget: undefined,
+        deliveryTarget: {
+          platform: "dingtalk",
+          payload: {
+            openConversationId: "cid",
+            conversationId: "cid",
+            conversationType: "2",
+            robotCode: "robot-code",
+            userId: "staff-1",
+          },
+        },
         replyContext: expect.objectContaining({
           sessionWebhookExpiredTime: expect.any(Number),
         }),
@@ -931,7 +945,7 @@ describe("dingtalk adapter", () => {
     );
   });
 
-  test("send uses persisted delivery target sessionWebhook", async () => {
+  test("send falls back to sessionWebhook when robot send identifiers are missing", async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,
       text: async () => "ok",
@@ -946,8 +960,6 @@ describe("dingtalk adapter", () => {
         payload: {
           sessionWebhook: "https://example.com/webhook",
           sessionWebhookExpiredTime: Date.now() + 60_000,
-          conversationId: "cid",
-          senderId: "uid",
         },
       },
       "hello",
@@ -956,6 +968,177 @@ describe("dingtalk adapter", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "https://example.com/webhook",
       expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  test("send uses robot group send api even when persisted sessionWebhook is fresh", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        createFetchResponse({
+          jsonBody: {
+            access_token: "token-1",
+            expires_in: 7200,
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        createFetchResponse({
+          jsonBody: {
+            result: {},
+          },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = createAdapter();
+
+    await adapter.send(
+      {
+        platform: "dingtalk",
+        payload: {
+          conversationId: "cid",
+          conversationType: "2",
+          robotCode: "robot-code",
+          userId: "staff-1",
+          sessionWebhook: "https://example.com/webhook",
+          sessionWebhookExpiredTime: Date.now() + 60_000,
+        },
+      },
+      "hello",
+    );
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "https://api.dingtalk.com/v1.0/oauth2/accessToken",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://api.dingtalk.com/v1.0/robot/groupMessages/send",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+          "x-acs-dingtalk-access-token": "token-1",
+        }),
+      }),
+    );
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      openConversationId: "cid",
+      robotCode: "robot-code",
+      msgKey: "sampleText",
+      msgParam: JSON.stringify({
+        content: "hello",
+      }),
+    });
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "https://example.com/webhook",
+      expect.anything(),
+    );
+  });
+
+  test("send uses markdown template payload for robot group sends", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        createFetchResponse({
+          jsonBody: {
+            accessToken: "token-1",
+            expireIn: 7200,
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        createFetchResponse({
+          jsonBody: {
+            result: {},
+          },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = createAdapter();
+
+    await adapter.send(
+      {
+        platform: "dingtalk",
+        payload: {
+          openConversationId: "cid-open",
+          conversationType: "2",
+          robotCode: "robot-code",
+        },
+      },
+      "## Title\n- item",
+    );
+
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      openConversationId: "cid-open",
+      robotCode: "robot-code",
+      msgKey: "sampleMarkdown",
+      msgParam: JSON.stringify({
+        title: "Title",
+        text: "## Title\n- item",
+      }),
+    });
+  });
+
+  test("send uses robot direct send api for direct conversations", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        createFetchResponse({
+          jsonBody: {
+            access_token: "token-1",
+            expires_in: 7200,
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        createFetchResponse({
+          jsonBody: {
+            result: {},
+          },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = createAdapter();
+
+    await adapter.send(
+      {
+        platform: "dingtalk",
+        payload: {
+          conversationType: "1",
+          openConversationId: "cid-direct",
+          robotCode: "robot-code",
+          userId: "staff-1",
+          sessionWebhook: "https://example.com/webhook",
+          sessionWebhookExpiredTime: Date.now() + 60_000,
+        },
+      },
+      "hello",
+    );
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+          "x-acs-dingtalk-access-token": "token-1",
+        }),
+      }),
+    );
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      robotCode: "robot-code",
+      msgKey: "sampleText",
+      msgParam: JSON.stringify({
+        content: "hello",
+      }),
+      userIds: ["staff-1"],
+    });
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "https://example.com/webhook",
+      expect.anything(),
     );
   });
 
@@ -974,8 +1157,6 @@ describe("dingtalk adapter", () => {
         payload: {
           sessionWebhook: "https://example.com/webhook",
           sessionWebhookExpiredTime: Date.now() + 60_000,
-          conversationId: "cid",
-          senderId: "uid",
         },
       },
       "## Title\n- item",
@@ -1005,8 +1186,6 @@ describe("dingtalk adapter", () => {
         payload: {
           sessionWebhook: "https://example.com/webhook",
           sessionWebhookExpiredTime: Date.now() + 60_000,
-          conversationId: "cid",
-          senderId: "uid",
         },
       },
       "🛠️ Agent\n`Explore | Explore codebase structure`",
@@ -1159,7 +1338,7 @@ describe("dingtalk adapter", () => {
     registerAllEventListener.mockRestore();
   });
 
-  test("send rejects expired persisted delivery target", async () => {
+  test("send rejects expired persisted delivery target without active send identifiers", async () => {
     const adapter = createAdapter();
 
     await expect(

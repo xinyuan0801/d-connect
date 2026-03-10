@@ -279,6 +279,7 @@ describe("command service", () => {
       raw: "/loop list",
     }));
     expect(listed).toContain("check status");
+    expect(loop.list("demo")[0]?.contextMode).toBe("isolated");
 
     const removed = expectHandled(await service.handle({
       runtime,
