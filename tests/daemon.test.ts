@@ -28,16 +28,6 @@ function createConfig(allowFrom: string): ResolvedAppConfig {
               processingNotice: "处理中...",
             },
           },
-          {
-            type: "feishu",
-            options: {
-              appId: "cli_xxx",
-              appSecret: "secret_xxx",
-              allowFrom: "user-1,user-2",
-              groupReplyAll: false,
-              reactionEmoji: "OnIt",
-            },
-          },
         ],
       },
     ],
@@ -62,7 +52,7 @@ describe("allowFrom wildcard warning", () => {
       },
       {
         projectName: "ops-bot",
-        platformType: "feishu",
+        platformType: "dingtalk",
       },
     ]);
 
@@ -71,7 +61,7 @@ describe("allowFrom wildcard warning", () => {
     expect(warning).toContain("如果这是共享群聊或公共环境，请先收紧 platform.options.allowFrom，再启动守护进程。");
     expect(warning).toContain("受影响的目标：");
     expect(warning).toContain("  - demo-project / dingtalk");
-    expect(warning).toContain("  - ops-bot / feishu");
+    expect(warning).toContain("  - ops-bot / dingtalk");
   });
 
   test("does not produce a warning when no wildcard target exists", () => {

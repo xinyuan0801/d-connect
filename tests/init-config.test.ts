@@ -43,44 +43,6 @@ describe("init config", () => {
     });
   });
 
-  test("buildConfigFromAnswers builds feishu project config", () => {
-    const answers = {
-      ...defaultInitAnswers(),
-      projectName: "feishu-service",
-      agentType: "qoder" as const,
-      agentCmd: "qodercli",
-      agentWorkDir: "/tmp/repo2",
-      agentModel: "",
-      platformType: "feishu" as const,
-      feishuAppId: "cli_123",
-      feishuAppSecret: "app_secret",
-      feishuGroupReplyAll: true,
-      feishuReactionEmoji: "OnIt",
-      allowFrom: "*",
-    };
-
-    const config = buildConfigFromAnswers(answers);
-    expect(config).not.toHaveProperty("dataDir");
-    expect(config.projects[0]?.agent.type).toBe("qoder");
-    expect(config.projects[0]?.agent.options).toEqual({
-      workDir: "/tmp/repo2",
-      cmd: "qodercli",
-    });
-    expect(config.projects[0]?.platforms[0]).toEqual({
-      type: "feishu",
-      options: {
-        appId: "cli_123",
-        appSecret: "app_secret",
-        allowFrom: "*",
-        groupReplyAll: true,
-        reactionEmoji: "OnIt",
-      },
-    });
-    expect(config.projects[0]?.guard).toEqual({
-      enabled: false,
-    });
-  });
-
   test("inferProjectNameFromWorkDir sanitizes workspace name", () => {
     expect(inferProjectNameFromWorkDir("/tmp/my repo")).toBe("my-repo");
     expect(inferProjectNameFromWorkDir("")).toBe("my-backend");

@@ -7,7 +7,7 @@ import { runInitTui } from "./init-tui.js";
 import { ensureDir } from "../infra/store-json/atomic.js";
 
 type AgentType = "claudecode" | "qoder" | "iflow";
-type PlatformType = "dingtalk" | "feishu";
+type PlatformType = "dingtalk";
 type LogLevel = "debug" | "info" | "warn" | "error";
 
 export interface InitAnswers {
@@ -23,10 +23,6 @@ export interface InitAnswers {
   dingtalkClientId: string;
   dingtalkClientSecret: string;
   dingtalkProcessingNotice: string;
-  feishuAppId: string;
-  feishuAppSecret: string;
-  feishuGroupReplyAll: boolean;
-  feishuReactionEmoji: string;
 }
 
 export interface InitConfigOptions {
@@ -84,10 +80,6 @@ export function defaultInitAnswers(opts: { cwd?: string } = {}): InitAnswers {
     dingtalkClientId: "dingxxxx",
     dingtalkClientSecret: "xxxx",
     dingtalkProcessingNotice: "处理中...",
-    feishuAppId: "cli_xxx",
-    feishuAppSecret: "xxx",
-    feishuGroupReplyAll: false,
-    feishuReactionEmoji: "OnIt",
   };
 }
 
@@ -101,9 +93,6 @@ export function buildConfigFromAnswers(answers: InitAnswers): AppConfig {
     dingtalkClientId: answers.dingtalkClientId.trim(),
     dingtalkClientSecret: answers.dingtalkClientSecret.trim(),
     dingtalkProcessingNotice: answers.dingtalkProcessingNotice.trim(),
-    feishuAppId: answers.feishuAppId.trim(),
-    feishuAppSecret: answers.feishuAppSecret.trim(),
-    feishuReactionEmoji: answers.feishuReactionEmoji.trim(),
     agentModel: answers.agentModel.trim(),
   };
 
@@ -116,27 +105,15 @@ export function buildConfigFromAnswers(answers: InitAnswers): AppConfig {
     agentOptions.model = normalized.agentModel;
   }
 
-  const platformOptions =
-    normalized.platformType === "dingtalk"
-      ? {
-          type: "dingtalk" as const,
-          options: {
-            clientId: toNonEmpty(normalized.dingtalkClientId, "dingtalkClientId"),
-            clientSecret: toNonEmpty(normalized.dingtalkClientSecret, "dingtalkClientSecret"),
-            allowFrom: normalized.allowFrom,
-            processingNotice: toNonEmpty(normalized.dingtalkProcessingNotice, "dingtalkProcessingNotice"),
-          },
-        }
-      : {
-          type: "feishu" as const,
-          options: {
-            appId: toNonEmpty(normalized.feishuAppId, "feishuAppId"),
-            appSecret: toNonEmpty(normalized.feishuAppSecret, "feishuAppSecret"),
-            allowFrom: normalized.allowFrom,
-            groupReplyAll: normalized.feishuGroupReplyAll,
-            reactionEmoji: toNonEmpty(normalized.feishuReactionEmoji, "feishuReactionEmoji"),
-          },
-        };
+  const platformOptions = {
+    type: "dingtalk" as const,
+    options: {
+      clientId: toNonEmpty(normalized.dingtalkClientId, "dingtalkClientId"),
+      clientSecret: toNonEmpty(normalized.dingtalkClientSecret, "dingtalkClientSecret"),
+      allowFrom: normalized.allowFrom,
+      processingNotice: toNonEmpty(normalized.dingtalkProcessingNotice, "dingtalkProcessingNotice"),
+    },
+  };
 
   return {
     configVersion: 1,

@@ -5,7 +5,7 @@ describe("guard service helpers", () => {
   test("buildGuardPrompt includes custom rules when provided", () => {
     const prompt = buildGuardPrompt({
       project: "demo",
-      sessionKey: "feishu:chat:user",
+      sessionKey: "dingtalk:chat:user",
       userId: "u1",
       userName: "alice",
       content: "deploy to production",

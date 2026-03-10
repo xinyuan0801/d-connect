@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-03-11
+
 ### Added
 
 - 新增基于 `v*` Git tag 的 GitHub Actions 发布流程，可自动创建 GitHub Release 并发布到 GitHub Packages。
@@ -11,6 +13,7 @@
 ### Changed
 
 - 将发布自动化和仓库运维说明沉淀到 `AGENTS.md`，不再放在 `README.md`。
+- 移除 `Feishu` 平台支持，当前仅保留 `DingTalk`。
 
 ## [0.1.1] - 2026-03-08
 

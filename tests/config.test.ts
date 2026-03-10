@@ -168,7 +168,7 @@ describe("config loader", () => {
     });
   });
 
-  test("loadConfig supports feishu platform", async () => {
+  test("loadConfig rejects removed feishu platform", async () => {
     const root = await mkdtemp(join(tmpdir(), "d-connect-config-"));
     const path = join(root, "config.json");
     const payload = JSON.parse(validConfigJson());
@@ -185,11 +185,7 @@ describe("config loader", () => {
     ];
     await writeFile(path, `${JSON.stringify(payload)}\n`, "utf8");
 
-    const cfg = await loadConfig(path);
-    expect(cfg.projects[0]?.platforms[0]?.type).toBe("feishu");
-    expect(cfg.projects[0]?.platforms[0]?.options).toMatchObject({
-      reactionEmoji: "OnIt",
-    });
+    await expect(loadConfig(path)).rejects.toThrow();
   });
 
   test("loadConfig rejects invalid agent type", async () => {

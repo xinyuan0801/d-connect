@@ -20,7 +20,7 @@ describe("session store", () => {
     store.addHistory(session, "user", "hello");
     store.addHistory(session, "assistant", "world");
     store.setDeliveryTarget("project:user", {
-      platform: "feishu",
+      platform: "dingtalk",
       payload: {
         chatId: "oc_123",
       },
@@ -33,7 +33,7 @@ describe("session store", () => {
     expect(loaded.history[0]?.content).toBe("hello");
     expect(loaded.history[1]?.content).toBe("world");
     expect(restored.getDeliveryTarget("project:user")).toEqual({
-      platform: "feishu",
+      platform: "dingtalk",
       payload: {
         chatId: "oc_123",
       },

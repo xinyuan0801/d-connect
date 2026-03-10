@@ -1,8 +1,8 @@
 {
   "name": "@xinyuan0801/d-connect",
-  "version": "0.3.5",
+  "version": "0.4.0",
   "type": "module",
-  "description": "Bridge local coding agents to DingTalk and Feishu",
+  "description": "Bridge local coding agents to DingTalk",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -17,8 +17,7 @@
     "cli",
     "daemon",
     "cron",
-    "dingtalk",
-    "feishu"
+    "dingtalk"
   ],
   "files": [
     "dist",
@@ -45,7 +44,6 @@
   },
   "packageManager": "pnpm@10.17.1",
   "dependencies": {
-    "@larksuiteoapi/node-sdk": "^1.59.0",
     "commander": "^14.0.1",
     "dingtalk-stream": "^2.1.4",
     "ink": "^6.8.0",

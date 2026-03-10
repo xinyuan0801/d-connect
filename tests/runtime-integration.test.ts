@@ -12,6 +12,42 @@ const mockState = vi.hoisted(() => ({
   agentInstances: [] as any[],
 }));
 
+const CHAT_ID = "chat-1";
+const CHAT_SESSION_KEY = "dingtalk:chat-1:user-1";
+const CHAT_TARGET: DeliveryTarget = {
+  platform: "dingtalk",
+  payload: {
+    chatId: CHAT_ID,
+  },
+};
+
+function createDingTalkPlatformConfig() {
+  return {
+    type: "dingtalk" as const,
+    options: {
+      clientId: "ding-id",
+      clientSecret: "ding-secret",
+      allowFrom: "*",
+      processingNotice: "处理中...",
+    },
+  };
+}
+
+function createInboundPlatformMessage(content: string, messageId: string): InboundMessage {
+  return {
+    platform: "dingtalk",
+    sessionKey: CHAT_SESSION_KEY,
+    userId: "user-1",
+    userName: "User 1",
+    content,
+    replyContext: {
+      messageId,
+      chatId: CHAT_ID,
+    },
+    deliveryTarget: CHAT_TARGET,
+  };
+}
+
 class FakeSession extends EventEmitter implements AgentSession {
   private readonly id: string;
   public prompts: string[] = [];
@@ -93,7 +129,7 @@ class FakeAgent implements AgentAdapter {
 }
 
 class FakePlatform implements PlatformAdapter {
-  readonly name = "feishu";
+  readonly name = "dingtalk";
   public handler?: (message: InboundMessage) => Promise<void> | void;
   public replies: Array<{ replyContext: unknown; content: string }> = [];
   public sends: Array<{ target: DeliveryTarget; content: string }> = [];
@@ -162,18 +198,7 @@ describe("runtime integration", () => {
               cmd: "fake",
             },
           },
-          platforms: [
-            {
-              type: "feishu" as const,
-              options: {
-                appId: "app-id",
-                appSecret: "app-secret",
-                allowFrom: "*",
-                groupReplyAll: false,
-                reactionEmoji: "none",
-              },
-            },
-          ],
+          platforms: [createDingTalkPlatformConfig()],
         },
       ],
     };
@@ -186,23 +211,7 @@ describe("runtime integration", () => {
     const platform1 = mockState.platformInstances[0];
     expect(platform1).toBeTruthy();
 
-    await platform1?.deliver({
-      platform: "feishu",
-      sessionKey: "feishu:chat-1:user-1",
-      userId: "user-1",
-      userName: "User 1",
-      content: "ping",
-      replyContext: {
-        messageId: "om_1",
-        chatId: "chat-1",
-      },
-      deliveryTarget: {
-        platform: "feishu",
-        payload: {
-          chatId: "chat-1",
-        },
-      },
-    });
+    await platform1?.deliver(createInboundPlatformMessage("ping", "om_1"));
 
     expect(platform1?.replies.map((item) => item.content)).toContain("echo:ping");
     await runtime.stop();
@@ -216,7 +225,7 @@ describe("runtime integration", () => {
     await restarted.executeJob({
       id: "job-1",
       project: "demo",
-      sessionKey: "feishu:chat-1:user-1",
+      sessionKey: CHAT_SESSION_KEY,
       scheduleExpr: "* * * * * *",
       prompt: "status",
       description: "test",
@@ -227,21 +236,11 @@ describe("runtime integration", () => {
 
     expect(platform2?.sends).toEqual([
       {
-        target: {
-          platform: "feishu",
-          payload: {
-            chatId: "chat-1",
-          },
-        },
+        target: CHAT_TARGET,
         content: "echo:status",
       },
       {
-        target: {
-          platform: "feishu",
-          payload: {
-            chatId: "chat-1",
-          },
-        },
+        target: CHAT_TARGET,
         content: "done:status",
       },
     ]);
@@ -265,18 +264,7 @@ describe("runtime integration", () => {
               cmd: "fake",
             },
           },
-          platforms: [
-            {
-              type: "feishu" as const,
-              options: {
-                appId: "app-id",
-                appSecret: "app-secret",
-                allowFrom: "*",
-                groupReplyAll: false,
-                reactionEmoji: "none",
-              },
-            },
-          ],
+          platforms: [createDingTalkPlatformConfig()],
         },
       ],
     };
@@ -289,23 +277,7 @@ describe("runtime integration", () => {
     const platform = mockState.platformInstances[0] as FakePlatform | undefined;
     const agent = mockState.agentInstances[0] as FakeAgent | undefined;
 
-    await platform?.deliver({
-      platform: "feishu",
-      sessionKey: "feishu:chat-1:user-1",
-      userId: "user-1",
-      userName: "User 1",
-      content: "ping",
-      replyContext: {
-        messageId: "om_1",
-        chatId: "chat-1",
-      },
-      deliveryTarget: {
-        platform: "feishu",
-        payload: {
-          chatId: "chat-1",
-        },
-      },
-    });
+    await platform?.deliver(createInboundPlatformMessage("ping", "om_1"));
 
     expect(agent?.sessions).toHaveLength(1);
     expect(agent?.sessions[0]?.prompts).toEqual(["ping"]);
@@ -313,7 +285,7 @@ describe("runtime integration", () => {
     await runtime.executeJob({
       id: "job-isolated",
       project: "demo",
-      sessionKey: "feishu:chat-1:user-1",
+      sessionKey: CHAT_SESSION_KEY,
       scheduleExpr: "* * * * * *",
       prompt: "status",
       description: "test",
@@ -327,21 +299,11 @@ describe("runtime integration", () => {
     expect(agent?.sessions[1]?.prompts).toEqual(["status"]);
     expect(platform?.sends).toEqual([
       {
-        target: {
-          platform: "feishu",
-          payload: {
-            chatId: "chat-1",
-          },
-        },
+        target: CHAT_TARGET,
         content: "echo:status",
       },
       {
-        target: {
-          platform: "feishu",
-          payload: {
-            chatId: "chat-1",
-          },
-        },
+        target: CHAT_TARGET,
         content: "done:status",
       },
     ]);
@@ -366,18 +328,7 @@ describe("runtime integration", () => {
               cmd: "fake",
             },
           },
-          platforms: [
-            {
-              type: "feishu" as const,
-              options: {
-                appId: "app-id",
-                appSecret: "app-secret",
-                allowFrom: "*",
-                groupReplyAll: false,
-                reactionEmoji: "none",
-              },
-            },
-          ],
+          platforms: [createDingTalkPlatformConfig()],
         },
       ],
     };
@@ -429,18 +380,7 @@ describe("runtime integration", () => {
             enabled: true,
             rules: "禁止任何 deploy 请求。",
           },
-          platforms: [
-            {
-              type: "feishu" as const,
-              options: {
-                appId: "app-id",
-                appSecret: "app-secret",
-                allowFrom: "*",
-                groupReplyAll: false,
-                reactionEmoji: "none",
-              },
-            },
-          ],
+          platforms: [createDingTalkPlatformConfig()],
         },
       ],
     };
@@ -451,23 +391,7 @@ describe("runtime integration", () => {
     const platform = mockState.platformInstances[0] as FakePlatform | undefined;
     const agent = mockState.agentInstances[0] as FakeAgent | undefined;
 
-    await platform?.deliver({
-      platform: "feishu",
-      sessionKey: "feishu:chat-1:user-1",
-      userId: "user-1",
-      userName: "User 1",
-      content: "please deploy",
-      replyContext: {
-        messageId: "om_block",
-        chatId: "chat-1",
-      },
-      deliveryTarget: {
-        platform: "feishu",
-        payload: {
-          chatId: "chat-1",
-        },
-      },
-    });
+    await platform?.deliver(createInboundPlatformMessage("please deploy", "om_block"));
 
     expect(agent?.guardPrompts).toHaveLength(1);
     expect(agent?.guardPrompts[0]).toContain("禁止任何 deploy 请求。");
@@ -504,18 +428,7 @@ describe("runtime integration", () => {
           guard: {
             enabled: true,
           },
-          platforms: [
-            {
-              type: "feishu" as const,
-              options: {
-                appId: "app-id",
-                appSecret: "app-secret",
-                allowFrom: "*",
-                groupReplyAll: false,
-                reactionEmoji: "none",
-              },
-            },
-          ],
+          platforms: [createDingTalkPlatformConfig()],
         },
       ],
     };
@@ -526,23 +439,7 @@ describe("runtime integration", () => {
     const platform = mockState.platformInstances[0] as FakePlatform | undefined;
     const agent = mockState.agentInstances[0] as FakeAgent | undefined;
 
-    await platform?.deliver({
-      platform: "feishu",
-      sessionKey: "feishu:chat-1:user-1",
-      userId: "user-1",
-      userName: "User 1",
-      content: "hello",
-      replyContext: {
-        messageId: "om_allow",
-        chatId: "chat-1",
-      },
-      deliveryTarget: {
-        platform: "feishu",
-        payload: {
-          chatId: "chat-1",
-        },
-      },
-    });
+    await platform?.deliver(createInboundPlatformMessage("hello", "om_allow"));
 
     expect(agent?.guardPrompts).toHaveLength(1);
     expect(agent?.conversationPrompts).toEqual(["hello"]);
@@ -571,18 +468,7 @@ describe("runtime integration", () => {
             enabled: true,
             rules: "禁止任何请求。",
           },
-          platforms: [
-            {
-              type: "feishu" as const,
-              options: {
-                appId: "app-id",
-                appSecret: "app-secret",
-                allowFrom: "*",
-                groupReplyAll: false,
-                reactionEmoji: "none",
-              },
-            },
-          ],
+          platforms: [createDingTalkPlatformConfig()],
         },
       ],
     };
@@ -593,23 +479,7 @@ describe("runtime integration", () => {
     const platform = mockState.platformInstances[0] as FakePlatform | undefined;
     const agent = mockState.agentInstances[0] as FakeAgent | undefined;
 
-    await platform?.deliver({
-      platform: "feishu",
-      sessionKey: "feishu:chat-1:user-1",
-      userId: "user-1",
-      userName: "User 1",
-      content: "/new review",
-      replyContext: {
-        messageId: "om_cmd",
-        chatId: "chat-1",
-      },
-      deliveryTarget: {
-        platform: "feishu",
-        payload: {
-          chatId: "chat-1",
-        },
-      },
-    });
+    await platform?.deliver(createInboundPlatformMessage("/new review", "om_cmd"));
 
     expect(agent?.guardPrompts).toHaveLength(0);
     expect(agent?.conversationPrompts).toHaveLength(0);

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
@@ -82,61 +82,6 @@ describe("add config", () => {
         },
       ],
     });
-  });
-
-  test("addProjectConfig falls back to default DingTalk placeholders when config has no DingTalk project", async () => {
-    const root = await mkdtemp(join(tmpdir(), "d-connect-add-"));
-    const configPath = join(root, "config.json");
-    await writeFile(
-      configPath,
-      `${JSON.stringify(
-        {
-          configVersion: 1,
-          log: { level: "info" },
-          loop: { silent: false },
-          projects: [
-            {
-              name: "chat-bot",
-              agent: {
-                type: "qoder",
-                options: {
-                  workDir: "/srv/chat-bot",
-                  cmd: "qodercli",
-                },
-              },
-              platforms: [
-                {
-                  type: "feishu",
-                  options: {
-                    appId: "cli_123",
-                    appSecret: "secret_123",
-                    allowFrom: "*",
-                    groupReplyAll: false,
-                    reactionEmoji: "OnIt",
-                  },
-                },
-              ],
-            },
-          ],
-        },
-        null,
-        2,
-      )}\n`,
-      "utf8",
-    );
-
-    const result = await addProjectConfig({
-      explicitConfigPath: configPath,
-      yes: true,
-      cwd: "/srv/new-bot",
-    });
-
-    expect(result.projectName).toBe("new-bot");
-    expect(result.reusedDingTalkConfig).toBe(false);
-
-    const file = await readFile(configPath, "utf8");
-    expect(file).toContain("\"clientId\": \"dingxxxx\"");
-    expect(file).toContain("\"clientSecret\": \"xxxx\"");
   });
 
   test("addProjectConfig rejects missing config file", async () => {

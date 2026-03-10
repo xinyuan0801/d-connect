@@ -49,17 +49,8 @@ function normalizeAgentOptions(options: BaseAgentOptionsConfig): ResolvedAgentOp
 }
 
 function normalizePlatformConfig(platform: ProjectConfig["platforms"][number]): ResolvedPlatformConfig {
-  if (platform.type === "dingtalk") {
-    return {
-      type: "dingtalk",
-      options: {
-        ...platform.options,
-      },
-    };
-  }
-
   return {
-    type: "feishu",
+    type: "dingtalk",
     options: {
       ...platform.options,
     },

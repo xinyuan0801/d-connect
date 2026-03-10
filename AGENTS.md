@@ -2,7 +2,7 @@
 
 ## 项目定位
 
-`d-connect` 是一个本地守护进程，用于把本机 Agent CLI（`claudecode`、`codex`、`qoder`、`opencode`、`iflow`）桥接到 IM 平台（当前支持 `DingTalk`、`Feishu`），并通过本地 IPC 和 loop 能力管理会话与定时任务。
+`d-connect` 是一个本地守护进程，用于把本机 Agent CLI（`claudecode`、`codex`、`qoder`、`opencode`、`iflow`）桥接到 IM 平台（当前支持 `DingTalk`），并通过本地 IPC 和 loop 能力管理会话与定时任务。
 
 ## 技术栈与运行约束
 

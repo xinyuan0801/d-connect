@@ -200,7 +200,6 @@ export function stepMood(stepId: string): string {
 
   if (
     stepId.startsWith("dingtalk") ||
-    stepId.startsWith("feishu") ||
     stepId === "platformType" ||
     stepId === "allowFromMode" ||
     stepId === "allowFrom"
@@ -273,10 +272,6 @@ function draftToAnswers(draft: WizardDraft, options: RunConfigWizardOptions): In
     dingtalkClientId: (draft.dingtalkClientId ?? options.defaults.dingtalkClientId).trim(),
     dingtalkClientSecret: (draft.dingtalkClientSecret ?? options.defaults.dingtalkClientSecret).trim(),
     dingtalkProcessingNotice: (draft.dingtalkProcessingNotice ?? options.defaults.dingtalkProcessingNotice).trim(),
-    feishuAppId: (draft.feishuAppId ?? options.defaults.feishuAppId).trim(),
-    feishuAppSecret: (draft.feishuAppSecret ?? options.defaults.feishuAppSecret).trim(),
-    feishuGroupReplyAll: parseBoolean(draft.feishuGroupReplyAll, options.defaults.feishuGroupReplyAll),
-    feishuReactionEmoji: (draft.feishuReactionEmoji ?? options.defaults.feishuReactionEmoji).trim(),
   };
 }
 

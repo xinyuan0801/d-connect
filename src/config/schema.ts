@@ -67,22 +67,11 @@ const platformSchema = z.object({
   }).strict(),
 }).strict();
 
-const feishuPlatformSchema = z.object({
-  type: z.literal("feishu"),
-  options: z.object({
-    appId: z.string().min(1),
-    appSecret: z.string().min(1),
-    allowFrom: z.string().default("*"),
-    groupReplyAll: z.boolean().default(false),
-    reactionEmoji: z.string().default("OnIt"),
-  }).strict(),
-}).strict();
-
 const projectSchema = z.object({
   name: z.string().min(1),
   agent: agentSchema,
   guard: guardSchema,
-  platforms: z.array(z.discriminatedUnion("type", [platformSchema, feishuPlatformSchema])).min(1),
+  platforms: z.array(platformSchema).min(1),
 }).strict();
 
 export const configSchema = z.object({
