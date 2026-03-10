@@ -945,7 +945,7 @@ describe("dingtalk adapter", () => {
     );
   });
 
-  test("send falls back to sessionWebhook when robot send identifiers are missing", async () => {
+  test("send ignores persisted delivery targets without proactive send identifiers", async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,
       text: async () => "ok",
@@ -958,6 +958,8 @@ describe("dingtalk adapter", () => {
       {
         platform: "dingtalk",
         payload: {
+          conversationId: "cid",
+          senderId: "staff-1",
           sessionWebhook: "https://example.com/webhook",
           sessionWebhookExpiredTime: Date.now() + 60_000,
         },
@@ -965,10 +967,7 @@ describe("dingtalk adapter", () => {
       "hello",
     );
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://example.com/webhook",
-      expect.objectContaining({ method: "POST" }),
-    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   test("send uses robot group send api even when persisted sessionWebhook is fresh", async () => {
@@ -996,7 +995,7 @@ describe("dingtalk adapter", () => {
       {
         platform: "dingtalk",
         payload: {
-          conversationId: "cid",
+          openConversationId: "cid",
           conversationType: "2",
           robotCode: "robot-code",
           userId: "staff-1",
@@ -1142,7 +1141,7 @@ describe("dingtalk adapter", () => {
     );
   });
 
-  test("send uses markdown payload when reply content contains markdown", async () => {
+  test("reply uses markdown payload when reply content contains markdown", async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,
       text: async () => "ok",
@@ -1151,13 +1150,10 @@ describe("dingtalk adapter", () => {
 
     const adapter = createAdapter();
 
-    await adapter.send(
+    await adapter.reply(
       {
-        platform: "dingtalk",
-        payload: {
-          sessionWebhook: "https://example.com/webhook",
-          sessionWebhookExpiredTime: Date.now() + 60_000,
-        },
+        sessionWebhook: "https://example.com/webhook",
+        sessionWebhookExpiredTime: Date.now() + 60_000,
       },
       "## Title\n- item",
     );
@@ -1171,7 +1167,7 @@ describe("dingtalk adapter", () => {
     });
   });
 
-  test("send renders tool status messages as fenced code markdown", async () => {
+  test("reply renders tool status messages as fenced code markdown", async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,
       text: async () => "ok",
@@ -1180,13 +1176,10 @@ describe("dingtalk adapter", () => {
 
     const adapter = createAdapter();
 
-    await adapter.send(
+    await adapter.reply(
       {
-        platform: "dingtalk",
-        payload: {
-          sessionWebhook: "https://example.com/webhook",
-          sessionWebhookExpiredTime: Date.now() + 60_000,
-        },
+        sessionWebhook: "https://example.com/webhook",
+        sessionWebhookExpiredTime: Date.now() + 60_000,
       },
       "🛠️ Agent\n`Explore | Explore codebase structure`",
     );
@@ -1338,24 +1331,22 @@ describe("dingtalk adapter", () => {
     registerAllEventListener.mockRestore();
   });
 
-  test("send rejects expired persisted delivery target without active send identifiers", async () => {
+  test("send ignores expired persisted delivery target without active send identifiers", async () => {
     const adapter = createAdapter();
 
-    await expect(
-      adapter.send(
-        {
-          platform: "dingtalk",
-          payload: {
-            sessionWebhook: "https://example.com/webhook",
-            sessionWebhookExpiredTime: Date.now() - 1,
-          },
+    await expect(adapter.send(
+      {
+        platform: "dingtalk",
+        payload: {
+          sessionWebhook: "https://example.com/webhook",
+          sessionWebhookExpiredTime: Date.now() - 1,
         },
-        "hello",
-      ),
-    ).rejects.toThrow(/sessionWebhook expired/i);
+      },
+      "hello",
+    )).resolves.toBeUndefined();
   });
 
-  test("send converts fetch aborts into timeout errors", async () => {
+  test("reply converts fetch aborts into timeout errors", async () => {
     const fetchMock = vi.fn(async () => {
       const error = new Error("aborted");
       error.name = "AbortError";
@@ -1366,13 +1357,10 @@ describe("dingtalk adapter", () => {
     const adapter = createAdapter();
 
     await expect(
-      adapter.send(
+      adapter.reply(
         {
-          platform: "dingtalk",
-          payload: {
-            sessionWebhook: "https://example.com/webhook",
-            sessionWebhookExpiredTime: Date.now() + 60_000,
-          },
+          sessionWebhook: "https://example.com/webhook",
+          sessionWebhookExpiredTime: Date.now() + 60_000,
         },
         "hello",
       ),

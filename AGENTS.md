@@ -154,7 +154,7 @@ pnpm run build
 - 排查“重复消费”时，优先同时看两个 ID：业务消息 ID `raw.msgId` 和 stream 层消息 ID `downstream.headers.messageId`。日志里最好同时打印 `conversationId`、`userId` 和内容预览，便于区分“平台重投同一消息”与“用户真的又发了一次”。
 - 排查“看起来串 session”时，不要只看钉钉聊天窗口。钉钉没有 thread 视图，多个逻辑 session 的回复会落在同一时间线里；应以 `.d-connect/sessions/sessions.json` 中的 `activeSession`、各 session 独立 history、`agentSessionId` 为准，先判断是 UI 交错还是后端真的混写。
 - DingTalk 的 `sessionWebhook` 是临时回复目标，必须结合 `sessionWebhookExpiredTime` 使用。当前异步回投/loop 不再尝试 `sessionWebhook`，而是按 `conversationType` 直接走机器人主动发送：群聊 `/v1.0/robot/groupMessages/send`，单聊 `/v1.0/robot/oToMessages/batchSend`。
-- DingTalk 的 loop 依赖持久化 `DeliveryTarget` 里的 `conversationType`、`robotCode`，以及群聊所需的 `openConversationId` 或单聊所需的 `userId`；历史 target 缺这些字段时，要靠新的真实 DingTalk 消息刷新。
+- DingTalk 的 loop 依赖持久化 `DeliveryTarget` 里的 `conversationType`、`robotCode`，以及群聊所需的 `openConversationId` 或单聊所需的 `userId`；历史旧版 target 缺这些字段时会被直接忽略。
 - 若日志显示 `dingtalk stream connected` 但没有任何入站处理，先核对三件事：是否订阅了 `TOPIC_ROBOT` callback、allow-list 是否放行当前用户、消息类型是否为当前支持的 `text`。
 
 ## 对后续 Agent 的要求

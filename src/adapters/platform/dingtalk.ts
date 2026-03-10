@@ -710,19 +710,31 @@ export class DingTalkAdapter implements PlatformAdapter {
       && (sessionWebhookExpiredTime === undefined || sessionWebhookExpiredTime <= 0 || sessionWebhookExpiredTime > Date.now());
   }
 
-  private extractActiveSendTarget(payload: DeliveryTarget["payload"]): DingTalkActiveSendTarget {
-    const openConversationId = typeof payload.openConversationId === "string"
-      ? payload.openConversationId.trim()
-      : typeof payload.conversationId === "string"
-        ? payload.conversationId.trim()
-        : "";
+  private extractActiveSendTarget(payload: DeliveryTarget["payload"]): DingTalkActiveSendTarget | null {
+    const openConversationId = typeof payload.openConversationId === "string" ? payload.openConversationId.trim() : "";
     const conversationType = typeof payload.conversationType === "string" ? payload.conversationType.trim() : "";
     const robotCode = typeof payload.robotCode === "string" ? payload.robotCode.trim() : "";
     const userId = typeof payload.userId === "string" ? payload.userId.trim() : "";
 
+    if (conversationType === DIRECT_CONVERSATION_TYPE) {
+      if (!userId) {
+        return null;
+      }
+
+      return {
+        conversationType,
+        ...(robotCode ? { robotCode } : {}),
+        userId,
+      };
+    }
+
+    if (!conversationType || !openConversationId) {
+      return null;
+    }
+
     return {
-      ...(openConversationId ? { openConversationId } : {}),
-      ...(conversationType ? { conversationType } : {}),
+      openConversationId,
+      conversationType,
       ...(robotCode ? { robotCode } : {}),
       ...(userId ? { userId } : {}),
     };
@@ -1665,16 +1677,18 @@ export class DingTalkAdapter implements PlatformAdapter {
   }
 
   async send(target: DeliveryTarget, content: string): Promise<void> {
-    const sessionWebhook = typeof target.payload.sessionWebhook === "string" ? target.payload.sessionWebhook : "";
-    const sessionWebhookExpiredTime =
-      typeof target.payload.sessionWebhookExpiredTime === "number" ? target.payload.sessionWebhookExpiredTime : undefined;
     const activeTarget = this.extractActiveSendTarget(target.payload);
-    if (activeTarget.openConversationId || activeTarget.userId) {
-      await this.sendViaRobotApi(activeTarget, content);
+    if (!activeTarget) {
+      this.logger.debug("skip dingtalk proactive send due to incomplete delivery target", {
+        hasOpenConversationId: typeof target.payload.openConversationId === "string" && target.payload.openConversationId.trim().length > 0,
+        hasConversationType: typeof target.payload.conversationType === "string" && target.payload.conversationType.trim().length > 0,
+        hasRobotCode: typeof target.payload.robotCode === "string" && target.payload.robotCode.trim().length > 0,
+        hasUserId: typeof target.payload.userId === "string" && target.payload.userId.trim().length > 0,
+      });
       return;
     }
 
-    await this.sendViaWebhook(sessionWebhook, content, sessionWebhookExpiredTime);
+    await this.sendViaRobotApi(activeTarget, content);
   }
 
   async stop(): Promise<void> {
