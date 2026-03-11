@@ -4,6 +4,9 @@
 
 `d-connect` 是一个运行在本机上的守护进程，用来把本地 Agent CLI 桥接到 IM 平台。
 
+> [!NOTE]
+> `d-connect` 当前只支持 `YOLO` 方式接入 Agent，不支持非 `YOLO` 模式。
+
 ## 它解决什么问题
 
 - 在 IM 里直接让本地 Agent 看代码、改代码、回答问题。
