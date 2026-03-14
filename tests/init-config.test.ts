@@ -67,6 +67,30 @@ describe("init config", () => {
     });
   });
 
+  test("buildConfigFromAnswers omits model when using codex defaults", () => {
+    const config = buildConfigFromAnswers({
+      ...defaultInitAnswers(),
+      projectName: "codex-service",
+      agentType: "codex",
+      agentCmd: "codex",
+      agentWorkDir: "/tmp/repo",
+      agentModel: "",
+      platformType: "dingtalk",
+      dingtalkClientId: "ding123",
+      dingtalkClientSecret: "secret123",
+      dingtalkProcessingNotice: "处理中...",
+      allowFrom: "*",
+    });
+
+    expect(config.projects[0]?.agent).toEqual({
+      type: "codex",
+      options: {
+        workDir: "/tmp/repo",
+        cmd: "codex",
+      },
+    });
+  });
+
   test("inferProjectNameFromWorkDir sanitizes workspace name", () => {
     expect(inferProjectNameFromWorkDir("/tmp/my repo")).toBe("my-repo");
     expect(inferProjectNameFromWorkDir("")).toBe("my-backend");

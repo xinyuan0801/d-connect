@@ -96,6 +96,14 @@ pnpm run dev loop list -p <project>
 
 优先复用 `src/adapters/agent/shared/base-cli-session.ts` 的 one-shot CLI 执行骨架，除非新的 Agent 明确需要不同生命周期。
 
+当前已落地的 `codex` 适配补充：
+
+- 基于本机验证过的 `codex-cli 0.114.0`
+- 非交互执行命令形态是 `codex exec --json`
+- 续聊使用 `codex exec resume <thread_id> <prompt>`
+- `reasoning_effort` 通过 `-c model_reasoning_effort="..."` 传递，不是独立 flag
+- `mode` 目前只映射 `suggest` / `full-auto` / `yolo`
+
 ### 新增 IM 平台支持
 
 通常需要同时修改：

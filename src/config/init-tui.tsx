@@ -74,7 +74,7 @@ const WIZARD_COLORS = {
 } as const;
 
 function asAgentType(value: string): AgentType {
-  if (value === "qoder" || value === "iflow") {
+  if (value === "codex" || value === "qoder" || value === "iflow") {
     return value;
   }
   return "claudecode";
@@ -128,6 +128,9 @@ function defaultAllowFromMode(options: RunConfigWizardOptions): AllowFromMode {
 }
 
 function defaultAgentCommand(agentType: AgentType): string {
+  if (agentType === "codex") {
+    return "codex";
+  }
   if (agentType === "qoder") {
     return "qodercli";
   }
@@ -585,6 +588,7 @@ export function buildWizardSteps(draft: WizardDraft, options: RunConfigWizardOpt
       defaultValue: options.defaults.agentType,
       options: [
         { label: "Claude Code", value: "claudecode", description: "默认体验，保留 model 默认值。" },
+        { label: "Codex CLI", value: "codex", description: "命令默认值为 codex，支持 mode / reasoning_effort。" },
         { label: "Qoder CLI", value: "qoder", description: "命令默认值为 qodercli。" },
         { label: "iFlow CLI", value: "iflow", description: "命令默认值为 iflow。" },
       ],

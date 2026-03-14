@@ -262,6 +262,35 @@ describe("config loader", () => {
     });
   });
 
+  test("loadConfig accepts codex agent type with codex-specific passthrough options", async () => {
+    const root = await mkdtemp(join(tmpdir(), "d-connect-config-"));
+    const path = join(root, "config.json");
+    const payload = JSON.parse(validConfigJson());
+    payload.projects[0].agent.type = "codex";
+    payload.projects[0].agent.options = {
+      cmd: "codex",
+      workDir: "/repo",
+      mode: "full-auto",
+      reasoning_effort: "high",
+      search: true,
+    };
+    await writeFile(path, `${JSON.stringify(payload)}\n`, "utf8");
+
+    const cfg = await loadConfig(path);
+    const resolved = normalizeConfig(cfg, { configPath: path });
+
+    expect(resolved.projects[0]?.agent).toEqual({
+      type: "codex",
+      options: {
+        cmd: "codex",
+        workDir: "/repo",
+        mode: "full-auto",
+        reasoning_effort: "high",
+        search: true,
+      },
+    });
+  });
+
   test("normalizeConfig keeps typed agent fields and passthrough extras", async () => {
     const root = await mkdtemp(join(tmpdir(), "d-connect-config-"));
     const path = join(root, "config.json");

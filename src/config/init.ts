@@ -6,7 +6,7 @@ import type { AppConfig } from "./schema.js";
 import { runInitTui } from "./init-tui.js";
 import { ensureDir } from "../infra/store-json/atomic.js";
 
-type AgentType = "claudecode" | "qoder" | "iflow";
+type AgentType = "claudecode" | "codex" | "qoder" | "iflow";
 type PlatformType = "dingtalk" | "discord";
 type LogLevel = "debug" | "info" | "warn" | "error";
 

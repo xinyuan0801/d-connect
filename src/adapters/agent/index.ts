@@ -2,6 +2,7 @@ import { Logger } from "../../logging.js";
 import type { AgentAdapter } from "../../core/types.js";
 import type { ResolvedProjectConfig } from "../../config/normalize.js";
 import { createClaudeCodeAdapter } from "./claudecode.js";
+import { createCodexAdapter } from "./codex.js";
 import { createQoderAdapter } from "./qoder.js";
 import { createIFlowAdapter } from "./iflow.js";
 import type { BaseAgentOptions } from "./options.js";
@@ -37,6 +38,8 @@ export function createAgentAdapter(project: ResolvedProjectConfig, logger: Logge
   switch (project.agent.type) {
     case "claudecode":
       return createClaudeCodeAdapter(options, logger);
+    case "codex":
+      return createCodexAdapter(options, logger);
     case "qoder":
       return createQoderAdapter(options, logger);
     case "iflow":

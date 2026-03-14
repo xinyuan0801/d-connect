@@ -41,6 +41,13 @@ const claudecodeAgentSchema = z
   })
   .strict();
 
+const codexAgentSchema = z
+  .object({
+    type: z.literal("codex"),
+    options: baseAgentOptionsSchema.default({}),
+  })
+  .strict();
+
 const qoderAgentSchema = z
   .object({
     type: z.literal("qoder"),
@@ -55,7 +62,12 @@ const iflowAgentSchema = z
   })
   .strict();
 
-const agentSchema = z.discriminatedUnion("type", [claudecodeAgentSchema, qoderAgentSchema, iflowAgentSchema]);
+const agentSchema = z.discriminatedUnion("type", [
+  claudecodeAgentSchema,
+  codexAgentSchema,
+  qoderAgentSchema,
+  iflowAgentSchema,
+]);
 
 const dingtalkPlatformSchema = z.object({
   type: z.literal("dingtalk"),
