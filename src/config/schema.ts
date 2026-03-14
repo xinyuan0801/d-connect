@@ -57,7 +57,7 @@ const iflowAgentSchema = z
 
 const agentSchema = z.discriminatedUnion("type", [claudecodeAgentSchema, qoderAgentSchema, iflowAgentSchema]);
 
-const platformSchema = z.object({
+const dingtalkPlatformSchema = z.object({
   type: z.literal("dingtalk"),
   options: z.object({
     clientId: z.string().min(1),
@@ -66,6 +66,17 @@ const platformSchema = z.object({
     processingNotice: z.string().default("处理中..."),
   }).strict(),
 }).strict();
+
+const discordPlatformSchema = z.object({
+  type: z.literal("discord"),
+  options: z.object({
+    botToken: z.string().min(1),
+    allowFrom: z.string().default("*"),
+    requireMention: z.boolean().default(true),
+  }).strict(),
+}).strict();
+
+const platformSchema = z.discriminatedUnion("type", [dingtalkPlatformSchema, discordPlatformSchema]);
 
 const projectSchema = z.object({
   name: z.string().min(1),

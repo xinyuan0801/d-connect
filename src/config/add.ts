@@ -19,15 +19,26 @@ export interface AddConfigOptions {
 export interface AddConfigResult {
   configPath: string;
   projectName: string;
+  reusedPlatformConfig: boolean;
   reusedDingTalkConfig: boolean;
 }
 
 interface DingTalkDefaults {
+  platformType: "dingtalk";
   allowFrom: string;
   dingtalkClientId: string;
   dingtalkClientSecret: string;
   dingtalkProcessingNotice: string;
 }
+
+interface DiscordDefaults {
+  platformType: "discord";
+  allowFrom: string;
+  discordBotToken: string;
+  discordRequireMention: boolean;
+}
+
+type ReusablePlatformDefaults = DingTalkDefaults | DiscordDefaults;
 
 export function ensureUniqueProjectName(projectName: string, existingNames: Iterable<string>): string {
   const usedNames = new Set(existingNames);
@@ -42,16 +53,27 @@ export function ensureUniqueProjectName(projectName: string, existingNames: Iter
   return `${projectName}-${suffix}`;
 }
 
-export function findReusableDingTalkDefaults(config: AppConfig): DingTalkDefaults | undefined {
+export function findReusablePlatformDefaults(config: AppConfig): ReusablePlatformDefaults | undefined {
   for (const project of config.projects) {
     for (const platform of project.platforms) {
-      if (platform.type === "dingtalk") {
-        return {
-          allowFrom: platform.options.allowFrom,
-          dingtalkClientId: platform.options.clientId,
-          dingtalkClientSecret: platform.options.clientSecret,
-          dingtalkProcessingNotice: platform.options.processingNotice,
-        };
+      switch (platform.type) {
+        case "dingtalk":
+          return {
+            platformType: "dingtalk",
+            allowFrom: platform.options.allowFrom,
+            dingtalkClientId: platform.options.clientId,
+            dingtalkClientSecret: platform.options.clientSecret,
+            dingtalkProcessingNotice: platform.options.processingNotice,
+          };
+        case "discord":
+          return {
+            platformType: "discord",
+            allowFrom: platform.options.allowFrom,
+            discordBotToken: platform.options.botToken,
+            discordRequireMention: platform.options.requireMention,
+          };
+        default:
+          break;
       }
     }
   }
@@ -84,12 +106,19 @@ export async function addProjectConfig(options: AddConfigOptions = {}): Promise<
     projectName: deriveProjectName(options.cwd ?? process.cwd()),
   };
 
-  const reusableDingTalk = findReusableDingTalkDefaults(config);
-  if (reusableDingTalk) {
-    defaults.allowFrom = reusableDingTalk.allowFrom;
-    defaults.dingtalkClientId = reusableDingTalk.dingtalkClientId;
-    defaults.dingtalkClientSecret = reusableDingTalk.dingtalkClientSecret;
-    defaults.dingtalkProcessingNotice = reusableDingTalk.dingtalkProcessingNotice;
+  const reusablePlatform = findReusablePlatformDefaults(config);
+  if (reusablePlatform) {
+    defaults.platformType = reusablePlatform.platformType;
+    defaults.allowFrom = reusablePlatform.allowFrom;
+
+    if (reusablePlatform.platformType === "dingtalk") {
+      defaults.dingtalkClientId = reusablePlatform.dingtalkClientId;
+      defaults.dingtalkClientSecret = reusablePlatform.dingtalkClientSecret;
+      defaults.dingtalkProcessingNotice = reusablePlatform.dingtalkProcessingNotice;
+    } else {
+      defaults.discordBotToken = reusablePlatform.discordBotToken;
+      defaults.discordRequireMention = reusablePlatform.discordRequireMention;
+    }
   }
 
   const answers = options.yes
@@ -102,7 +131,8 @@ export async function addProjectConfig(options: AddConfigOptions = {}): Promise<
       stdout: options.stdout ?? processStdout,
       deriveProjectName,
       mode: "add",
-      promptDingTalkCredentials: !reusableDingTalk,
+      promptDingTalkCredentials: reusablePlatform?.platformType !== "dingtalk",
+      promptDiscordCredentials: reusablePlatform?.platformType !== "discord",
     });
 
   const nextConfig: AppConfig = {
@@ -116,6 +146,7 @@ export async function addProjectConfig(options: AddConfigOptions = {}): Promise<
   return {
     configPath,
     projectName: answers.projectName,
-    reusedDingTalkConfig: Boolean(reusableDingTalk),
+    reusedPlatformConfig: Boolean(reusablePlatform),
+    reusedDingTalkConfig: reusablePlatform?.platformType === "dingtalk",
   };
 }

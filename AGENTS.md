@@ -2,7 +2,7 @@
 
 ## 项目定位
 
-`d-connect` 是一个本地守护进程，用于把本机 Agent CLI（`claudecode`、`codex`、`qoder`、`opencode`、`iflow`）桥接到 IM 平台（当前支持 `DingTalk`），并通过本地 IPC 和 loop 能力管理会话与定时任务。
+`d-connect` 是一个本地守护进程，用于把本机 Agent CLI（`claudecode`、`codex`、`qoder`、`iflow`）桥接到 IM 平台（当前支持 `DingTalk`、`Discord`），并通过本地 IPC 和 loop 能力管理会话与定时任务。
 
 ## 技术栈与运行约束
 
@@ -111,6 +111,7 @@ pnpm run dev loop list -p <project>
 - `src/adapters/platform/shared/allow-list.ts`
 - `src/adapters/platform/shared/delivery-target.ts`
 - `PlatformAdapter.send()` 的异步回投语义
+- Discord 当前走标准 Bot Token 鉴权，入站用 Gateway，出站/异步回投用 REST `channels/{channel.id}/messages`
 
 ### 修改配置结构
 
@@ -156,6 +157,14 @@ pnpm run build
 - DingTalk 的 `sessionWebhook` 是临时回复目标，必须结合 `sessionWebhookExpiredTime` 使用。当前异步回投/loop 不再尝试 `sessionWebhook`，而是按 `conversationType` 直接走机器人主动发送：群聊 `/v1.0/robot/groupMessages/send`，单聊 `/v1.0/robot/oToMessages/batchSend`。
 - DingTalk 的 loop 依赖持久化 `DeliveryTarget` 里的 `conversationType`、`robotCode`，以及群聊所需的 `openConversationId` 或单聊所需的 `userId`；历史旧版 target 缺这些字段时会被直接忽略。
 - 若日志显示 `dingtalk stream connected` 但没有任何入站处理，先核对三件事：是否订阅了 `TOPIC_ROBOT` callback、allow-list 是否放行当前用户、消息类型是否为当前支持的 `text`。
+
+### Discord 排障经验
+
+- Discord 机器人接入使用标准 `Bot Token`；当前实现会先调 `/gateway/bot` 建连，再通过 Gateway 接收入站消息。
+- 群聊文本触发依赖 `MESSAGE CONTENT INTENT`。若 bot 能收到事件但正文总是空，优先检查 Developer Portal 里的这个开关。
+- 当前默认 `requireMention = true`：群聊里只有显式 `@bot` 或回复 bot 的消息才会进 Agent；若看起来“机器人没反应”，先确认是不是没 mention。
+- Discord 的异步回投/loop 只依赖持久化 `DeliveryTarget` 里的 `channelId`；历史 target 缺这个字段时会被直接忽略。
+- 出站消息默认关闭 `allowed_mentions.parse`，避免 Agent 输出意外触发 `@everyone` 或角色 mention；若业务上确实需要 mention，当前实现需要改代码，不是配置项。
 
 ## 对后续 Agent 的要求
 

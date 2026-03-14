@@ -43,6 +43,30 @@ describe("init config", () => {
     });
   });
 
+  test("buildConfigFromAnswers builds discord project config", () => {
+    const config = buildConfigFromAnswers({
+      ...defaultInitAnswers(),
+      projectName: "discord-service",
+      agentType: "iflow",
+      agentCmd: "iflow",
+      agentWorkDir: "/tmp/repo",
+      agentModel: "",
+      platformType: "discord",
+      allowFrom: "user-1,user-2",
+      discordBotToken: "discord-bot-token",
+      discordRequireMention: false,
+    });
+
+    expect(config.projects[0]?.platforms[0]).toEqual({
+      type: "discord",
+      options: {
+        botToken: "discord-bot-token",
+        allowFrom: "user-1,user-2",
+        requireMention: false,
+      },
+    });
+  });
+
   test("inferProjectNameFromWorkDir sanitizes workspace name", () => {
     expect(inferProjectNameFromWorkDir("/tmp/my repo")).toBe("my-repo");
     expect(inferProjectNameFromWorkDir("")).toBe("my-backend");

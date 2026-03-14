@@ -96,6 +96,7 @@ describe("iflow pending tool tracking", () => {
   test("new sessions do not inherit a previous iflow conversation id", async () => {
     const adapter = createIFlowAdapter(
       {
+        cmd: "iflow",
         workDir: "/Users/felixwang/Desktop/d-connect",
       },
       new Logger("error"),
@@ -112,6 +113,7 @@ describe("iflow pending tool tracking", () => {
   test("legacy mode values are ignored and iflow is always started in yolo mode", () => {
     const adapter = createIFlowAdapter(
       {
+        cmd: "iflow",
         workDir: "/Users/felixwang/Desktop/d-connect",
         mode: "plan",
       } as any,
@@ -126,6 +128,7 @@ describe("iflow pending tool tracking", () => {
   test("buildIFlowArgs uses -p prompt flag instead of legacy -i", () => {
     const adapter = createIFlowAdapter(
       {
+        cmd: "iflow",
         workDir: "/Users/felixwang/Desktop/d-connect",
       },
       new Logger("error"),
@@ -139,6 +142,7 @@ describe("iflow pending tool tracking", () => {
   test("buildIFlowArgs appends --output-file when turn output path is provided", () => {
     const adapter = createIFlowAdapter(
       {
+        cmd: "iflow",
         workDir: "/Users/felixwang/Desktop/d-connect",
       },
       new Logger("error"),
@@ -155,6 +159,7 @@ describe("iflow pending tool tracking", () => {
   test("buildIFlowArgs does not duplicate --output-file when user args already include it", () => {
     const adapter = createIFlowAdapter(
       {
+        cmd: "iflow",
         workDir: "/Users/felixwang/Desktop/d-connect",
         args: ["--output-file", "/tmp/custom-iflow-output.json"],
       },
@@ -170,6 +175,7 @@ describe("iflow pending tool tracking", () => {
   test("spawnEnv prepends node executable directory using platform delimiter", () => {
     const adapter = createIFlowAdapter(
       {
+        cmd: "iflow",
         workDir: "/Users/felixwang/Desktop/d-connect",
       },
       new Logger("error"),
@@ -217,6 +223,7 @@ describe("iflow pending tool tracking", () => {
 
     const adapter = new IFlowAdapter(
       {
+        cmd: "iflow",
         workDir,
       },
       new Logger("error"),
@@ -286,6 +293,7 @@ describe("iflow pending tool tracking", () => {
 
     const adapter = new IFlowAdapter(
       {
+        cmd: "iflow",
         workDir: "/Users/felixwang/Desktop/d-connect",
       },
       new Logger("error"),
@@ -417,6 +425,7 @@ Error shutting down SDK: TypeError: r is not a function
   test("fallback metadata-only output emits friendly result instead of raw wrapper text", async () => {
     const adapter = new IFlowAdapter(
       {
+        cmd: "iflow",
         workDir: "/Users/felixwang/Desktop/d-connect",
       },
       new Logger("error"),
@@ -455,6 +464,7 @@ How can I assist you today?
   test("uses background command id as post-tool fallback when no final reply is produced", async () => {
     const adapter = new IFlowAdapter(
       {
+        cmd: "iflow",
         workDir: "/Users/felixwang/Desktop/d-connect",
       },
       new Logger("error"),
@@ -488,6 +498,7 @@ How can I assist you today?
 
     const adapter = new IFlowAdapter(
       {
+        cmd: "iflow",
         workDir: "/Users/felixwang/Desktop/d-connect",
       },
       new Logger("error"),
@@ -533,6 +544,7 @@ How can I assist you today?
   test("close kills active iflow child process", async () => {
     const adapter = new IFlowAdapter(
       {
+        cmd: "iflow",
         workDir: "/Users/felixwang/Desktop/d-connect",
       },
       new Logger("error"),

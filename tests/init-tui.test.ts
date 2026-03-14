@@ -38,6 +38,7 @@ describe("init tui helpers", () => {
     expect(stepMood("agentWorkDir")).toContain("Agent");
     expect(stepMood("allowFromMode")).toContain("平台");
     expect(stepMood("dingtalkClientId")).toContain("平台");
+    expect(stepMood("discordBotToken")).toContain("平台");
     expect(stepMood("confirm")).toContain("最终");
     expect(stepMood("logLevel")).toContain("运行时");
   });
@@ -153,6 +154,7 @@ describe("init tui helpers", () => {
     expect(buildWizardSteps({}, options).map((step) => step.id)).toEqual([
       "agentType",
       "agentWorkDirMode",
+      "platformType",
       "allowFromMode",
       "allowFrom",
       "dingtalkClientId",
@@ -172,6 +174,10 @@ describe("init tui helpers", () => {
       "当前目录作为 Agent 工作目录",
       "手动输入其他目录",
     ]);
+
+    const platformTypeStep = buildWizardSteps({}, options).find((step) => step.id === "platformType");
+    expect(platformTypeStep?.label).toBe("请选择 IM 平台");
+    expect(platformTypeStep?.options?.map((option) => option.value)).toEqual(["dingtalk", "discord"]);
 
     const clientIdStep = buildWizardSteps({}, options).find((step) => step.id === "dingtalkClientId");
     expect(clientIdStep?.defaultValue).toBe("");
@@ -207,6 +213,7 @@ describe("init tui helpers", () => {
       "agentType",
       "agentWorkDirMode",
       "agentWorkDir",
+      "platformType",
       "allowFromMode",
       "allowFrom",
       "dingtalkClientId",
@@ -237,6 +244,7 @@ describe("init tui helpers", () => {
     expect(buildWizardSteps({}, options).map((step) => step.id)).toEqual([
       "agentType",
       "agentWorkDirMode",
+      "platformType",
       "allowFromMode",
       "confirm",
     ]);
@@ -259,10 +267,64 @@ describe("init tui helpers", () => {
     expect(steps.map((step) => step.id)).toEqual([
       "agentType",
       "agentWorkDirMode",
+      "platformType",
       "allowFromMode",
       "dingtalkClientId",
       "dingtalkClientSecret",
       "confirm",
     ]);
+  });
+
+  test("buildWizardSteps switches to discord-specific prompts", () => {
+    const defaults = defaultInitAnswers({ cwd: "/repo/workdir" });
+    const options = {
+      defaults,
+      configPath: "/repo/config.json",
+      overwritten: false,
+      stdin: process.stdin,
+      stdout: process.stdout,
+      deriveProjectName: (workDir: string, fallback?: string) => fallback ?? workDir,
+    };
+
+    const steps = buildWizardSteps({ platformType: "discord" }, options);
+    expect(steps.map((step) => step.id)).toEqual([
+      "agentType",
+      "agentWorkDirMode",
+      "platformType",
+      "allowFromMode",
+      "allowFrom",
+      "discordRequireMention",
+      "discordBotToken",
+      "confirm",
+    ]);
+
+    const mentionStep = steps.find((step) => step.id === "discordRequireMention");
+    expect(mentionStep?.options?.map((option) => option.value)).toEqual(["true", "false"]);
+
+    const tokenStep = steps.find((step) => step.id === "discordBotToken");
+    expect(tokenStep?.placeholder).toContain("discord-bot-token");
+  });
+
+  test("buildWizardOverview shows reused discord credentials", () => {
+    const defaults = {
+      ...defaultInitAnswers({ cwd: "/repo/workdir" }),
+      platformType: "discord" as const,
+      allowFrom: "user-1",
+      discordBotToken: "discord-token",
+      discordRequireMention: true,
+    };
+    const options = {
+      defaults,
+      configPath: "/repo/config.json",
+      overwritten: true,
+      stdin: process.stdin,
+      stdout: process.stdout,
+      deriveProjectName: (workDir: string, fallback?: string) => fallback ?? workDir,
+      mode: "add" as const,
+      promptDiscordCredentials: false,
+    };
+
+    const overview = buildWizardOverview({}, options);
+    expect(overview.find((item) => item.label === "platform.options.credentials")?.value).toBe("复用已有 Discord botToken");
   });
 });

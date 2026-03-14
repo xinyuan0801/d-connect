@@ -7,7 +7,7 @@ import { runInitTui } from "./init-tui.js";
 import { ensureDir } from "../infra/store-json/atomic.js";
 
 type AgentType = "claudecode" | "qoder" | "iflow";
-type PlatformType = "dingtalk";
+type PlatformType = "dingtalk" | "discord";
 type LogLevel = "debug" | "info" | "warn" | "error";
 
 export interface InitAnswers {
@@ -23,6 +23,8 @@ export interface InitAnswers {
   dingtalkClientId: string;
   dingtalkClientSecret: string;
   dingtalkProcessingNotice: string;
+  discordBotToken: string;
+  discordRequireMention: boolean;
 }
 
 export interface InitConfigOptions {
@@ -80,6 +82,8 @@ export function defaultInitAnswers(opts: { cwd?: string } = {}): InitAnswers {
     dingtalkClientId: "dingxxxx",
     dingtalkClientSecret: "xxxx",
     dingtalkProcessingNotice: "处理中...",
+    discordBotToken: "",
+    discordRequireMention: true,
   };
 }
 
@@ -93,6 +97,8 @@ export function buildConfigFromAnswers(answers: InitAnswers): AppConfig {
     dingtalkClientId: answers.dingtalkClientId.trim(),
     dingtalkClientSecret: answers.dingtalkClientSecret.trim(),
     dingtalkProcessingNotice: answers.dingtalkProcessingNotice.trim(),
+    discordBotToken: answers.discordBotToken.trim(),
+    discordRequireMention: answers.discordRequireMention,
     agentModel: answers.agentModel.trim(),
   };
 
@@ -105,15 +111,25 @@ export function buildConfigFromAnswers(answers: InitAnswers): AppConfig {
     agentOptions.model = normalized.agentModel;
   }
 
-  const platformOptions = {
-    type: "dingtalk" as const,
-    options: {
-      clientId: toNonEmpty(normalized.dingtalkClientId, "dingtalkClientId"),
-      clientSecret: toNonEmpty(normalized.dingtalkClientSecret, "dingtalkClientSecret"),
-      allowFrom: normalized.allowFrom,
-      processingNotice: toNonEmpty(normalized.dingtalkProcessingNotice, "dingtalkProcessingNotice"),
-    },
-  };
+  const platformOptions =
+    normalized.platformType === "discord"
+      ? {
+        type: "discord" as const,
+        options: {
+          botToken: toNonEmpty(normalized.discordBotToken, "discordBotToken"),
+          allowFrom: normalized.allowFrom,
+          requireMention: normalized.discordRequireMention,
+        },
+      }
+      : {
+        type: "dingtalk" as const,
+        options: {
+          clientId: toNonEmpty(normalized.dingtalkClientId, "dingtalkClientId"),
+          clientSecret: toNonEmpty(normalized.dingtalkClientSecret, "dingtalkClientSecret"),
+          allowFrom: normalized.allowFrom,
+          processingNotice: toNonEmpty(normalized.dingtalkProcessingNotice, "dingtalkProcessingNotice"),
+        },
+      };
 
   return {
     configVersion: 1,

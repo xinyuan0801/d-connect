@@ -53,6 +53,7 @@ describe("add config", () => {
     });
 
     expect(result.projectName).toBe("repo-2");
+    expect(result.reusedPlatformConfig).toBe(true);
     expect(result.reusedDingTalkConfig).toBe(true);
 
     const updated = await loadConfig(configPath);
@@ -81,6 +82,66 @@ describe("add config", () => {
           },
         },
       ],
+    });
+  });
+
+  test("addProjectConfig reuses existing Discord settings", async () => {
+    const root = await mkdtemp(join(tmpdir(), "d-connect-add-"));
+    const configPath = join(root, "config.json");
+    await writeFile(
+      configPath,
+      `${JSON.stringify(
+        {
+          configVersion: 1,
+          log: { level: "info" },
+          loop: { silent: false },
+          projects: [
+            {
+              name: "discord-repo",
+              agent: {
+                type: "iflow",
+                options: {
+                  workDir: "/srv/discord-repo",
+                  cmd: "iflow",
+                },
+              },
+              platforms: [
+                {
+                  type: "discord",
+                  options: {
+                    botToken: "discord-token",
+                    allowFrom: "user-1",
+                    requireMention: true,
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const result = await addProjectConfig({
+      explicitConfigPath: configPath,
+      yes: true,
+      cwd: "/srv/discord-repo",
+    });
+
+    expect(result.projectName).toBe("discord-repo-2");
+    expect(result.reusedPlatformConfig).toBe(true);
+    expect(result.reusedDingTalkConfig).toBe(false);
+
+    const updated = await loadConfig(configPath);
+    expect(updated.projects[1]?.platforms[0]).toEqual({
+      type: "discord",
+      options: {
+        botToken: "discord-token",
+        allowFrom: "user-1",
+        requireMention: true,
+      },
     });
   });
 

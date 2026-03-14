@@ -2,6 +2,7 @@ import { join } from "node:path";
 import type { ResolvedProjectConfig } from "../../config/normalize.js";
 import { Logger } from "../../logging.js";
 import type { PlatformAdapter } from "../../core/types.js";
+import { DiscordAdapter, type DiscordOptions } from "./discord.js";
 import { DingTalkAdapter, type DingTalkOptions } from "./dingtalk.js";
 
 export function createPlatformAdapters(project: ResolvedProjectConfig, logger: Logger): PlatformAdapter[] {
@@ -21,6 +22,13 @@ export function createPlatformAdapters(project: ResolvedProjectConfig, logger: L
         adapters.push(new DingTalkAdapter(options, logger.child(`platform:${platform.type}`)));
         break;
       }
+      case "discord": {
+        const options: DiscordOptions = {
+          ...(platform.options as DiscordOptions),
+        };
+        adapters.push(new DiscordAdapter(options, logger.child(`platform:${platform.type}`)));
+        break;
+      }
       default:
         throw new Error(`unsupported platform type: ${String((platform as { type: unknown }).type)}`);
     }
@@ -29,3 +37,4 @@ export function createPlatformAdapters(project: ResolvedProjectConfig, logger: L
 }
 
 export * from "./dingtalk.js";
+export * from "./discord.js";

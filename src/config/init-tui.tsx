@@ -3,6 +3,7 @@ import { Box, Text, render, useApp, useInput } from "ink";
 import type { InitAnswers } from "./init.js";
 
 type AgentType = InitAnswers["agentType"];
+type PlatformType = InitAnswers["platformType"];
 type LogLevel = InitAnswers["logLevel"];
 type WizardMode = "init" | "add";
 type HighlightedPart = { text: string; highlight: boolean };
@@ -20,6 +21,7 @@ export interface RunConfigWizardOptions {
   deriveProjectName: (workDir: string, fallback?: string) => string;
   mode?: WizardMode;
   promptDingTalkCredentials?: boolean;
+  promptDiscordCredentials?: boolean;
 }
 
 interface SelectOption {
@@ -85,6 +87,13 @@ function asLogLevel(value: string): LogLevel {
   return "info";
 }
 
+function asPlatformType(value: string): PlatformType {
+  if (value === "discord") {
+    return "discord";
+  }
+  return "dingtalk";
+}
+
 function parseBoolean(value: string | undefined, fallback: boolean): boolean {
   if (value === "true") {
     return true;
@@ -136,7 +145,8 @@ function defaultAgentModel(agentType: AgentType): string {
 }
 
 function isSensitiveStep(stepId: string): boolean {
-  return stepId.toLowerCase().includes("secret");
+  const lowered = stepId.toLowerCase();
+  return lowered.includes("secret") || lowered.includes("token");
 }
 
 function maskSecret(value: string): string {
@@ -200,6 +210,7 @@ export function stepMood(stepId: string): string {
 
   if (
     stepId.startsWith("dingtalk") ||
+    stepId.startsWith("discord") ||
     stepId === "platformType" ||
     stepId === "allowFromMode" ||
     stepId === "allowFrom"
@@ -249,6 +260,7 @@ export function parseHighlightedText(input: string): HighlightedPart[] {
 
 function draftToAnswers(draft: WizardDraft, options: RunConfigWizardOptions): InitAnswers {
   const agentType = asAgentType(draft.agentType ?? options.defaults.agentType);
+  const platformType = asPlatformType(draft.platformType ?? options.defaults.platformType);
   const workDirMode = asWorkDirMode(draft.agentWorkDirMode);
   const allowFromMode = asAllowFromMode(draft.allowFromMode ?? defaultAllowFromMode(options));
   const defaultAllowFrom = options.defaults.allowFrom.trim();
@@ -267,11 +279,13 @@ function draftToAnswers(draft: WizardDraft, options: RunConfigWizardOptions): In
     agentCmd: (draft.agentCmd ?? defaultAgentCommand(agentType)).trim(),
     agentWorkDir,
     agentModel: draft.agentModel ?? defaultAgentModel(agentType),
-    platformType: "dingtalk",
+    platformType,
     allowFrom: allowFromMode === "all" ? "*" : (draft.allowFrom ?? allowFromFallback).trim(),
     dingtalkClientId: (draft.dingtalkClientId ?? options.defaults.dingtalkClientId).trim(),
     dingtalkClientSecret: (draft.dingtalkClientSecret ?? options.defaults.dingtalkClientSecret).trim(),
     dingtalkProcessingNotice: (draft.dingtalkProcessingNotice ?? options.defaults.dingtalkProcessingNotice).trim(),
+    discordBotToken: (draft.discordBotToken ?? options.defaults.discordBotToken).trim(),
+    discordRequireMention: parseBoolean(draft.discordRequireMention, options.defaults.discordRequireMention),
   };
 }
 
@@ -337,6 +351,7 @@ export function buildWizardOverview(draft: WizardDraft, options: RunConfigWizard
   const answers = draftToAnswers(draft, options);
   const mode = options.mode ?? "init";
   const promptDingTalkCredentials = options.promptDingTalkCredentials ?? true;
+  const promptDiscordCredentials = options.promptDiscordCredentials ?? true;
   const modeLine = modeSummary(mode, options.overwritten);
 
   const items: WizardOverviewItem[] = [
@@ -368,7 +383,27 @@ export function buildWizardOverview(draft: WizardDraft, options: RunConfigWizard
     },
   ];
 
-  if (promptDingTalkCredentials) {
+  if (answers.platformType === "discord") {
+    items.push({
+      label: "platform.options.requireMention",
+      value: answers.discordRequireMention ? "true" : "false",
+      tone: answers.discordRequireMention ? "normal" : "warning",
+    });
+
+    if (promptDiscordCredentials) {
+      items.push({
+        label: "platform.options.botToken",
+        value: maskSecret(answers.discordBotToken),
+        tone: answers.discordBotToken.length > 0 ? "accent" : "warning",
+      });
+    } else {
+      items.push({
+        label: "platform.options.credentials",
+        value: "复用已有 Discord botToken",
+        tone: "accent",
+      });
+    }
+  } else if (promptDingTalkCredentials) {
     items.push(
       {
         label: "platform.options.clientId",
@@ -408,6 +443,7 @@ export function buildWizardOverview(draft: WizardDraft, options: RunConfigWizard
 export function buildStepContext(stepId: string, draft: WizardDraft, options: RunConfigWizardOptions): WizardOverviewItem[] {
   const answers = draftToAnswers(draft, options);
   const promptDingTalkCredentials = options.promptDingTalkCredentials ?? true;
+  const promptDiscordCredentials = options.promptDiscordCredentials ?? true;
 
   if (stepId === "agentType") {
     return [
@@ -486,12 +522,53 @@ export function buildStepContext(stepId: string, draft: WizardDraft, options: Ru
     ];
   }
 
+  if (stepId === "discordRequireMention") {
+    return [
+      {
+        label: "platform.options.requireMention",
+        value: answers.discordRequireMention ? "true" : "false",
+        tone: answers.discordRequireMention ? "normal" : "warning",
+      },
+      {
+        label: "platform.options.allowFrom",
+        value: answers.allowFrom.length > 0 ? answers.allowFrom : "待填写",
+        tone: answers.allowFrom.length > 0 ? "muted" : "warning",
+      },
+      {
+        label: "platform.options.botToken",
+        value: promptDiscordCredentials ? maskSecret(answers.discordBotToken) : "复用已有配置",
+        tone: answers.discordBotToken.length > 0 ? "accent" : "warning",
+      },
+    ];
+  }
+
+  if (stepId === "discordBotToken") {
+    return [
+      {
+        label: "platform.options.botToken",
+        value: promptDiscordCredentials ? maskSecret(answers.discordBotToken) : "复用已有配置",
+        tone: answers.discordBotToken.length > 0 ? "accent" : "warning",
+      },
+      {
+        label: "platform.options.requireMention",
+        value: answers.discordRequireMention ? "true" : "false",
+      },
+      {
+        label: "platform.options.allowFrom",
+        value: answers.allowFrom.length > 0 ? answers.allowFrom : "待填写",
+        tone: answers.allowFrom.length > 0 ? "muted" : "warning",
+      },
+    ];
+  }
+
   return buildWizardOverview(draft, options);
 }
 
 export function buildWizardSteps(draft: WizardDraft, options: RunConfigWizardOptions): WizardStep[] {
   const mode = options.mode ?? "init";
   const promptDingTalkCredentials = options.promptDingTalkCredentials ?? true;
+  const promptDiscordCredentials = options.promptDiscordCredentials ?? true;
+  const platformType = asPlatformType(draft.platformType ?? options.defaults.platformType);
   const workDirMode = asWorkDirMode(draft.agentWorkDirMode);
   const allowFromMode = asAllowFromMode(draft.allowFromMode ?? defaultAllowFromMode(options));
   const allowFromDefault = options.defaults.allowFrom.trim();
@@ -557,6 +634,28 @@ export function buildWizardSteps(draft: WizardDraft, options: RunConfigWizardOpt
   }
 
   steps.push({
+    id: "platformType",
+    kind: "select",
+    title: "平台接入",
+    label: "请选择 IM 平台",
+    hint: "DingTalk 走 clientId/clientSecret；Discord 走 bot token。",
+    required: true,
+    defaultValue: options.defaults.platformType,
+    options: [
+      {
+        label: "DingTalk",
+        value: "dingtalk",
+        description: "适合现有钉钉机器人接入链路。",
+      },
+      {
+        label: "Discord",
+        value: "discord",
+        description: "通过 Discord bot token + Gateway/REST API 接入。",
+      },
+    ],
+  });
+
+  steps.push({
     id: "allowFromMode",
     kind: "select",
     title: "访问控制",
@@ -595,7 +694,31 @@ export function buildWizardSteps(draft: WizardDraft, options: RunConfigWizardOpt
     });
   }
 
-  if (promptDingTalkCredentials) {
+  if (platformType === "discord") {
+    steps.push({
+      id: "discordRequireMention",
+      kind: "select",
+      title: "Discord 群聊行为",
+      label: "群聊里是否必须 @ 机器人或回复机器人消息？",
+      hint: "DM 不受这个选项影响；在群聊里建议默认开启，避免 bot 抢答。",
+      required: true,
+      defaultValue: options.defaults.discordRequireMention ? "true" : "false",
+      options: [
+        {
+          label: "必须 @ 机器人 / 回复机器人",
+          value: "true",
+          description: "更安全，默认推荐；只处理明确发给机器人的群消息。",
+        },
+        {
+          label: "不要求 mention",
+          value: "false",
+          description: "群聊中 allowFrom 命中的用户发言都会触发机器人。",
+        },
+      ],
+    });
+  }
+
+  if (platformType === "dingtalk" && promptDingTalkCredentials) {
     steps.push(
       {
         id: "dingtalkClientId",
@@ -618,6 +741,19 @@ export function buildWizardSteps(draft: WizardDraft, options: RunConfigWizardOpt
         defaultValue: "",
       },
     );
+  }
+
+  if (platformType === "discord" && promptDiscordCredentials) {
+    steps.push({
+      id: "discordBotToken",
+      kind: "text",
+      title: "Discord 凭证",
+      label: "platform.options.botToken",
+      hint: "使用 Discord Developer Portal 里 Bot 页面生成的 token。",
+      placeholder: "例如 MTAx...discord-bot-token",
+      required: true,
+      defaultValue: "",
+    });
   }
 
   steps.push({

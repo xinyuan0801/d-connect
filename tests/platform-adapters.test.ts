@@ -56,4 +56,24 @@ describe("platform adapters", () => {
 
     expect((adapter as { inboundMediaDir?: string }).inboundMediaDir).toBe("/custom/media");
   });
+
+  test("creates discord adapter from platform config", () => {
+    const [adapter] = createPlatformAdapters(
+      createProject({
+        platforms: [
+          {
+            type: "discord",
+            options: {
+              botToken: "discord-token",
+              allowFrom: "user-1",
+              requireMention: true,
+            },
+          },
+        ] as ResolvedProjectConfig["platforms"],
+      }),
+      new Logger("error"),
+    );
+
+    expect(adapter.name).toBe("discord");
+  });
 });

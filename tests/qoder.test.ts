@@ -52,7 +52,7 @@ describe("qoder adapter", () => {
       {
         cmd: process.execPath,
         args: ["-e", buildAskUserQuestionScript(), "--", "--output-format", "stream-json"],
-      } as any,
+      },
       new Logger("error"),
     );
 

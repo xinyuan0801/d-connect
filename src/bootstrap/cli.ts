@@ -118,7 +118,7 @@ export function createCliProgram(): Command {
   const program = new Command();
   program
     .name("d-connect")
-    .description("Bridge DingTalk to local coding agents")
+    .description("Bridge IM platforms to local coding agents")
     .showHelpAfterError();
 
   program

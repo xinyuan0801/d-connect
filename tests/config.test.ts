@@ -168,6 +168,31 @@ describe("config loader", () => {
     });
   });
 
+  test("loadConfig parses discord platform defaults", async () => {
+    const root = await mkdtemp(join(tmpdir(), "d-connect-config-"));
+    const path = join(root, "config.json");
+    const payload = JSON.parse(validConfigJson());
+    payload.projects[0].platforms = [
+      {
+        type: "discord",
+        options: {
+          botToken: "discord-token",
+        },
+      },
+    ];
+    await writeFile(path, `${JSON.stringify(payload)}\n`, "utf8");
+
+    const cfg = await loadConfig(path);
+    expect(cfg.projects[0]?.platforms[0]).toEqual({
+      type: "discord",
+      options: {
+        botToken: "discord-token",
+        allowFrom: "*",
+        requireMention: true,
+      },
+    });
+  });
+
   test("loadConfig rejects removed feishu platform", async () => {
     const root = await mkdtemp(join(tmpdir(), "d-connect-config-"));
     const path = join(root, "config.json");
@@ -261,6 +286,36 @@ describe("config loader", () => {
       enabled: false,
     });
     expect(resolved.dataDir).toBe(join(root, ".d-connect"));
+  });
+
+  test("normalizeConfig preserves args and env in agent.options", async () => {
+    const root = await mkdtemp(join(tmpdir(), "d-connect-config-"));
+    const path = join(root, "config.json");
+    const payload = JSON.parse(validConfigJson());
+    payload.projects[0].agent.type = "claudecode";
+    payload.projects[0].agent.options = {
+      workDir: "/repo",
+      cmd: "claude",
+      args: ["--verbose"],
+      env: {
+        FOO: "bar",
+      },
+      allowedTools: ["Read"],
+    };
+    await writeFile(path, `${JSON.stringify(payload)}\n`, "utf8");
+
+    const cfg = await loadConfig(path);
+    const resolved = normalizeConfig(cfg, { configPath: path });
+
+    expect(resolved.projects[0]?.agent.options).toEqual({
+      cmd: "claude",
+      workDir: "/repo",
+      args: ["--verbose"],
+      env: {
+        FOO: "bar",
+      },
+      allowedTools: ["Read"],
+    });
   });
 
   test("normalizeConfig preserves custom guard rules", async () => {

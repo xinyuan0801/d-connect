@@ -49,12 +49,24 @@ function normalizeAgentOptions(options: BaseAgentOptionsConfig): ResolvedAgentOp
 }
 
 function normalizePlatformConfig(platform: ProjectConfig["platforms"][number]): ResolvedPlatformConfig {
-  return {
-    type: "dingtalk",
-    options: {
-      ...platform.options,
-    },
-  };
+  switch (platform.type) {
+    case "dingtalk":
+      return {
+        type: "dingtalk",
+        options: {
+          ...platform.options,
+        },
+      };
+    case "discord":
+      return {
+        type: "discord",
+        options: {
+          ...platform.options,
+        },
+      };
+    default:
+      throw new Error(`unsupported platform type: ${String((platform as { type: unknown }).type)}`);
+  }
 }
 
 function normalizeGuardConfig(project: ProjectConfig): ResolvedGuardConfig {
