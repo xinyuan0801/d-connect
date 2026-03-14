@@ -12,7 +12,6 @@ const DISCORD_RECONNECT_DELAY_MS = 2_000;
 const DISCORD_REQUEST_TIMEOUT_MS = 15_000;
 const DISCORD_MESSAGE_LIMIT = 2_000;
 const DISCORD_REPLY_REACTION = "👀";
-const DISCORD_REPLY_REACTION_CACHE_TTL_MS = 10 * 60_000;
 
 interface DiscordSocketLike {
   addEventListener(type: string, listener: (event: unknown) => void): void;
@@ -95,6 +94,11 @@ interface PendingGatewayConnect {
   timer: NodeJS.Timeout;
   resolve: () => void;
   reject: (error: Error) => void;
+}
+
+interface ReplyReactionState {
+  count: number;
+  added: boolean;
 }
 
 export interface DiscordOptions {
@@ -330,6 +334,10 @@ function replyReactionCacheKey(channelId: string, messageId: string): string {
   return `${channelId}:${messageId}:${DISCORD_REPLY_REACTION}`;
 }
 
+function reactionPath(channelId: string, messageId: string): string {
+  return `/channels/${channelId}/messages/${messageId}/reactions/${encodeURIComponent(DISCORD_REPLY_REACTION)}/@me`;
+}
+
 function webSocketCtor(): (new (url: string) => DiscordSocketLike) {
   const ctor = globalThis.WebSocket as unknown as (new (url: string) => DiscordSocketLike) | undefined;
   if (!ctor) {
@@ -351,7 +359,7 @@ export class DiscordAdapter implements PlatformAdapter {
   private stopped = false;
   private seq: number | null = null;
   private botUserId?: string;
-  private readonly replyReactionCache = new Map<string, number>();
+  private readonly replyReactions = new Map<string, ReplyReactionState>();
 
   constructor(private readonly options: DiscordOptions, private readonly logger: Logger) {
     this.allowList = parseAllowList(options.allowFrom);
@@ -376,16 +384,70 @@ export class DiscordAdapter implements PlatformAdapter {
     }
   }
 
-  async reply(replyCtx: unknown, content: string): Promise<void> {
-    const ctx = replyCtx as DiscordReplyContext | undefined;
-    const channelId = trimString(ctx?.channelId);
-    const messageId = trimString(ctx?.messageId);
-
-    if (!channelId || !messageId) {
-      throw new Error("missing Discord reply context");
+  async beginResponse(replyCtx: unknown): Promise<void> {
+    const { channelId, messageId } = this.getReplyContext(replyCtx);
+    const key = replyReactionCacheKey(channelId, messageId);
+    const existing = this.replyReactions.get(key);
+    if (existing) {
+      existing.count += 1;
+      return;
     }
 
-    await this.ensureReplyReaction(channelId, messageId);
+    const state: ReplyReactionState = {
+      count: 1,
+      added: false,
+    };
+    this.replyReactions.set(key, state);
+
+    try {
+      await this.discordFetch(reactionPath(channelId, messageId), {
+        method: "PUT",
+      });
+      state.added = true;
+    } catch (error) {
+      this.logger.warn("failed to add discord reply reaction", {
+        error: (error as Error).message,
+        channelId,
+        messageId,
+        reaction: DISCORD_REPLY_REACTION,
+      });
+    }
+  }
+
+  async endResponse(replyCtx: unknown): Promise<void> {
+    const { channelId, messageId } = this.getReplyContext(replyCtx);
+    const key = replyReactionCacheKey(channelId, messageId);
+    const state = this.replyReactions.get(key);
+    if (!state) {
+      return;
+    }
+
+    state.count -= 1;
+    if (state.count > 0) {
+      return;
+    }
+
+    this.replyReactions.delete(key);
+    if (!state.added) {
+      return;
+    }
+
+    try {
+      await this.discordFetch(reactionPath(channelId, messageId), {
+        method: "DELETE",
+      });
+    } catch (error) {
+      this.logger.warn("failed to remove discord reply reaction", {
+        error: (error as Error).message,
+        channelId,
+        messageId,
+        reaction: DISCORD_REPLY_REACTION,
+      });
+    }
+  }
+
+  async reply(replyCtx: unknown, content: string): Promise<void> {
+    const { channelId, messageId } = this.getReplyContext(replyCtx);
     await this.sendToChannel(channelId, content, messageId);
   }
 
@@ -741,47 +803,19 @@ export class DiscordAdapter implements PlatformAdapter {
     return url;
   }
 
-  private async ensureReplyReaction(channelId: string, messageId: string): Promise<void> {
-    if (!this.rememberReplyReaction(channelId, messageId)) {
-      return;
+  private getReplyContext(replyCtx: unknown): DiscordReplyContext {
+    const ctx = replyCtx as DiscordReplyContext | undefined;
+    const channelId = trimString(ctx?.channelId);
+    const messageId = trimString(ctx?.messageId);
+
+    if (!channelId || !messageId) {
+      throw new Error("missing Discord reply context");
     }
 
-    try {
-      await this.discordFetch(
-        `/channels/${channelId}/messages/${messageId}/reactions/${encodeURIComponent(DISCORD_REPLY_REACTION)}/@me`,
-        {
-          method: "PUT",
-        },
-      );
-    } catch (error) {
-      this.logger.warn("failed to add discord reply reaction", {
-        error: (error as Error).message,
-        channelId,
-        messageId,
-        reaction: DISCORD_REPLY_REACTION,
-      });
-    }
-  }
-
-  private rememberReplyReaction(channelId: string, messageId: string): boolean {
-    const now = Date.now();
-    this.pruneReplyReactionCache(now);
-
-    const key = replyReactionCacheKey(channelId, messageId);
-    if (this.replyReactionCache.has(key)) {
-      return false;
-    }
-
-    this.replyReactionCache.set(key, now);
-    return true;
-  }
-
-  private pruneReplyReactionCache(now: number): void {
-    for (const [key, timestamp] of this.replyReactionCache) {
-      if (now - timestamp > DISCORD_REPLY_REACTION_CACHE_TTL_MS) {
-        this.replyReactionCache.delete(key);
-      }
-    }
+    return {
+      channelId,
+      messageId,
+    };
   }
 
   private async sendToChannel(channelId: string, content: string, replyToMessageId?: string): Promise<void> {

@@ -374,16 +374,46 @@ describe("discord adapter", () => {
     });
   });
 
-  test("reply adds a reaction and posts a discord message reference to the original message", async () => {
+  test("beginResponse adds a discord reaction and endResponse removes it", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(createFetchResponse({ status: 204 }))
-      .mockResolvedValueOnce(
-        createFetchResponse({
-          jsonBody: {
-            id: "reply-1",
-          },
-        }),
-      );
+      .mockResolvedValueOnce(createFetchResponse({ status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = createAdapter();
+    const replyContext = {
+      channelId: "channel-1",
+      messageId: "message-1",
+    };
+
+    await adapter.beginResponse(replyContext);
+    await adapter.endResponse(replyContext);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "https://discord.com/api/v10/channels/channel-1/messages/message-1/reactions/%F0%9F%91%80/@me",
+      expect.objectContaining({
+        method: "PUT",
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://discord.com/api/v10/channels/channel-1/messages/message-1/reactions/%F0%9F%91%80/@me",
+      expect.objectContaining({
+        method: "DELETE",
+      }),
+    );
+  });
+
+  test("reply posts a discord message reference without adding a reaction", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      createFetchResponse({
+        jsonBody: {
+          id: "reply-1",
+        },
+      }),
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     const adapter = createAdapter();
@@ -395,16 +425,8 @@ describe("discord adapter", () => {
       "hello",
     );
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      1,
-      "https://discord.com/api/v10/channels/channel-1/messages/message-1/reactions/%F0%9F%91%80/@me",
-      expect.objectContaining({
-        method: "PUT",
-      }),
-    );
-
-    const body = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
     expect(body).toEqual({
       content: "hello",
       allowed_mentions: {
@@ -418,11 +440,10 @@ describe("discord adapter", () => {
     });
   });
 
-  test("reply adds the reaction only once for repeated replies to the same discord message", async () => {
+  test("nested beginResponse/endResponse only add and remove one discord reaction", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(createFetchResponse({ status: 204 }))
-      .mockResolvedValueOnce(createFetchResponse({ jsonBody: { id: "reply-1" } }))
-      .mockResolvedValueOnce(createFetchResponse({ jsonBody: { id: "reply-2" } }));
+      .mockResolvedValueOnce(createFetchResponse({ status: 204 }));
     vi.stubGlobal("fetch", fetchMock);
 
     const adapter = createAdapter();
@@ -431,39 +452,33 @@ describe("discord adapter", () => {
       messageId: "message-1",
     };
 
-    await adapter.reply(replyContext, "hello");
-    await adapter.reply(replyContext, "world");
+    await adapter.beginResponse(replyContext);
+    await adapter.beginResponse(replyContext);
+    await adapter.endResponse(replyContext);
+    await adapter.endResponse(replyContext);
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    const reactionCalls = fetchMock.mock.calls.filter(([url]) =>
-      String(url).includes("/reactions/%F0%9F%91%80/@me")
-    );
-    expect(reactionCalls).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  test("reply still posts a discord reply when adding the reaction fails", async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(
-        createFetchResponse({
-          ok: false,
-          status: 403,
-          bodyText: "missing permissions",
-        }),
-      )
-      .mockResolvedValueOnce(createFetchResponse({ jsonBody: { id: "reply-1" } }));
+  test("endResponse skips removing the reaction when beginResponse could not add it", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      createFetchResponse({
+        ok: false,
+        status: 403,
+        bodyText: "missing permissions",
+      }),
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     const adapter = createAdapter();
+    const replyContext = {
+      channelId: "channel-1",
+      messageId: "message-1",
+    };
 
-    await expect(adapter.reply(
-      {
-        channelId: "channel-1",
-        messageId: "message-1",
-      },
-      "hello",
-    )).resolves.toBeUndefined();
+    await adapter.beginResponse(replyContext);
+    await adapter.endResponse(replyContext);
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(String(fetchMock.mock.calls[1]?.[0])).toBe("https://discord.com/api/v10/channels/channel-1/messages");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

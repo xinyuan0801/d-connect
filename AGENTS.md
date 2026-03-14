@@ -171,7 +171,7 @@ pnpm run build
 - Discord 机器人接入使用标准 `Bot Token`；当前实现会先调 `/gateway/bot` 建连，再通过 Gateway 接收入站消息。
 - 群聊文本触发依赖 `MESSAGE CONTENT INTENT`。若 bot 能收到事件但正文总是空，优先检查 Developer Portal 里的这个开关。
 - 当前默认 `requireMention = true`：群聊里只有显式 `@bot` 或回复 bot 的消息才会进 Agent；若看起来“机器人没反应”，先确认是不是没 mention。
-- Discord 即时回复首次命中某条用户消息时，会先给原消息补一个 `👀` reaction，再发送引用回复；同一条消息的流式多段回复只会补一次 reaction。
+- Discord 即时回复会在开始处理该条用户消息时立刻补一个 `👀` reaction，并在本轮回复结束后移除；流式多段回复期间不会重复添加。
 - Discord 的异步回投/loop 只依赖持久化 `DeliveryTarget` 里的 `channelId`；历史 target 缺这个字段时会被直接忽略。
 - 出站消息默认关闭 `allowed_mentions.parse`，避免 Agent 输出意外触发 `@everyone` 或角色 mention；若业务上确实需要 mention，当前实现需要改代码，不是配置项。
 

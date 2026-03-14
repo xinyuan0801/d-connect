@@ -133,12 +133,22 @@ class FakePlatform implements PlatformAdapter {
   public handler?: (message: InboundMessage) => Promise<void> | void;
   public replies: Array<{ replyContext: unknown; content: string }> = [];
   public sends: Array<{ target: DeliveryTarget; content: string }> = [];
+  public lifecycleEvents: string[] = [];
 
   async start(handler: (message: InboundMessage) => Promise<void> | void): Promise<void> {
     this.handler = handler;
   }
 
+  async beginResponse(replyContext: unknown): Promise<void> {
+    this.lifecycleEvents.push(`begin:${String((replyContext as { messageId?: string }).messageId ?? "")}`);
+  }
+
+  async endResponse(replyContext: unknown): Promise<void> {
+    this.lifecycleEvents.push(`end:${String((replyContext as { messageId?: string }).messageId ?? "")}`);
+  }
+
   async reply(replyContext: unknown, content: string): Promise<void> {
+    this.lifecycleEvents.push(`reply:${content}`);
     this.replies.push({ replyContext, content });
   }
 
@@ -356,6 +366,43 @@ describe("runtime integration", () => {
     expect(session?.prompts[0]).not.toContain("pnpm run dev");
     expect(session?.prompts[0]).toContain("用户请求：每天早上 9 点提醒我检查构建状态，规则用 0 0 9 * * *");
     expect(result.response).not.toContain("unknown /loop command");
+
+    await runtime.stop();
+  });
+
+  test("wraps inbound replies with platform response lifecycle hooks", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "d-connect-runtime-"));
+    const config = {
+      configVersion: 1,
+      dataDir,
+      log: { level: "error" as const },
+      loop: { silent: false },
+      projects: [
+        {
+          name: "demo",
+          agent: {
+            type: "claudecode" as const,
+            options: {
+              cmd: "fake",
+            },
+          },
+          platforms: [createDingTalkPlatformConfig()],
+        },
+      ],
+    };
+
+    const runtime = new RuntimeEngine(config, new Logger("error"));
+    await runtime.start();
+
+    const platform = mockState.platformInstances[0] as FakePlatform | undefined;
+    await platform?.deliver(createInboundPlatformMessage("ping", "om_1"));
+
+    expect(platform?.lifecycleEvents).toEqual([
+      "begin:om_1",
+      "reply:echo:ping",
+      "reply:done:ping",
+      "end:om_1",
+    ]);
 
     await runtime.stop();
   });

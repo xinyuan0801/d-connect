@@ -1,4 +1,4 @@
-import type { LoopJob, DeliveryTarget, InboundMessage, JobExecutor, TurnResult } from "../core/types.js";
+import type { LoopJob, DeliveryTarget, InboundMessage, JobExecutor, PlatformAdapter, TurnResult } from "../core/types.js";
 import type { ResolvedAppConfig } from "../config/normalize.js";
 import type { SessionRecord } from "./session-repository.js";
 import { Logger } from "../infra/logging/logger.js";
@@ -200,6 +200,36 @@ export class DaemonRuntime implements JobExecutor {
     return this.dispatch(input);
   }
 
+  private async beginPlatformResponse(platform: PlatformAdapter, replyContext: unknown): Promise<void> {
+    if (!platform.beginResponse) {
+      return;
+    }
+
+    try {
+      await platform.beginResponse(replyContext);
+    } catch (error) {
+      this.logger.warn("platform beginResponse hook failed", {
+        platform: platform.name,
+        error: (error as Error).message,
+      });
+    }
+  }
+
+  private async endPlatformResponse(platform: PlatformAdapter, replyContext: unknown): Promise<void> {
+    if (!platform.endResponse) {
+      return;
+    }
+
+    try {
+      await platform.endResponse(replyContext);
+    } catch (error) {
+      this.logger.warn("platform endResponse hook failed", {
+        platform: platform.name,
+        error: (error as Error).message,
+      });
+    }
+  }
+
   private async sendAsync(project: string, sessionKey: string, response: string, events: AgentEvent[] = []): Promise<void> {
     const runtime = this.getProjectRuntime(project);
     const deliveryTarget = this.conversations.findDeliveryTarget(project, sessionKey);
@@ -227,44 +257,49 @@ export class DaemonRuntime implements JobExecutor {
       throw new Error(`platform not found for project ${project}: ${platformName}`);
     }
 
-    if (runtime.config.guard?.enabled === true && !isSlashCommandMessage(message.content)) {
-      const decision = await this.guardService.evaluate(runtime, {
-        project,
-        sessionKey: message.sessionKey,
-        userId: message.userId,
-        userName: message.userName,
-        content: message.content,
-      });
-
-      if (decision.action === "block") {
-        const response = buildGuardBlockedMessage(decision.reason);
-        this.logger.warn("platform message blocked by guard", {
+    await this.beginPlatformResponse(platform, message.replyContext);
+    try {
+      if (runtime.config.guard?.enabled === true && !isSlashCommandMessage(message.content)) {
+        const decision = await this.guardService.evaluate(runtime, {
           project,
-          platform: platformName,
           sessionKey: message.sessionKey,
           userId: message.userId,
-          reason: decision.reason,
+          userName: message.userName,
           content: message.content,
         });
-        await this.relay.reply(platform, message.replyContext, response);
-        return;
-      }
-    }
 
-    await this.dispatch(
-      {
-        project,
-        sessionKey: message.sessionKey,
-        content: message.content,
-        userId: message.userId,
-        userName: message.userName,
-      },
-      {
-        replyPlatformName: platformName,
-        replyContext: message.replyContext,
-        deliveryTarget: message.deliveryTarget,
-      },
-    );
+        if (decision.action === "block") {
+          const response = buildGuardBlockedMessage(decision.reason);
+          this.logger.warn("platform message blocked by guard", {
+            project,
+            platform: platformName,
+            sessionKey: message.sessionKey,
+            userId: message.userId,
+            reason: decision.reason,
+            content: message.content,
+          });
+          await this.relay.reply(platform, message.replyContext, response);
+          return;
+        }
+      }
+
+      await this.dispatch(
+        {
+          project,
+          sessionKey: message.sessionKey,
+          content: message.content,
+          userId: message.userId,
+          userName: message.userName,
+        },
+        {
+          replyPlatformName: platformName,
+          replyContext: message.replyContext,
+          deliveryTarget: message.deliveryTarget,
+        },
+      );
+    } finally {
+      await this.endPlatformResponse(platform, message.replyContext);
+    }
   }
 
   async executeJob(job: LoopJob): Promise<void> {

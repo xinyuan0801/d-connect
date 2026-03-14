@@ -28,6 +28,8 @@ export type MessageHandler = (message: InboundMessage) => void | Promise<void>;
 export interface PlatformAdapter {
   readonly name: string;
   start(handler: MessageHandler): Promise<void>;
+  beginResponse?(replyContext: unknown): Promise<void>;
+  endResponse?(replyContext: unknown): Promise<void>;
   reply(replyContext: unknown, content: string): Promise<void>;
   send(target: DeliveryTarget, content: string): Promise<void>;
   stop(): Promise<void>;
