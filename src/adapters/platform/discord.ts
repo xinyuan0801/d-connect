@@ -1,4 +1,10 @@
-import type { DeliveryTarget, InboundMessage, MessageHandler, PlatformAdapter } from "../../core/types.js";
+import type {
+  DeliveryTarget,
+  InboundMessage,
+  MessageHandler,
+  PlatformAdapter,
+  PlatformResponseResult,
+} from "../../core/types.js";
 import { Logger } from "../../logging.js";
 import { parseAllowList } from "./shared/allow-list.js";
 import { createDeliveryTarget } from "./shared/delivery-target.js";
@@ -11,7 +17,8 @@ const DISCORD_READY_TIMEOUT_MS = 10_000;
 const DISCORD_RECONNECT_DELAY_MS = 2_000;
 const DISCORD_REQUEST_TIMEOUT_MS = 15_000;
 const DISCORD_MESSAGE_LIMIT = 2_000;
-const DISCORD_REPLY_REACTION = "👀";
+const DISCORD_PROCESSING_REACTION = "👀";
+const DISCORD_COMPLETED_REACTION = "💯";
 
 interface DiscordSocketLike {
   addEventListener(type: string, listener: (event: unknown) => void): void;
@@ -331,11 +338,11 @@ function extractSessionKey(channelId: string, userId: string): string {
 }
 
 function replyReactionCacheKey(channelId: string, messageId: string): string {
-  return `${channelId}:${messageId}:${DISCORD_REPLY_REACTION}`;
+  return `${channelId}:${messageId}:${DISCORD_PROCESSING_REACTION}`;
 }
 
-function reactionPath(channelId: string, messageId: string): string {
-  return `/channels/${channelId}/messages/${messageId}/reactions/${encodeURIComponent(DISCORD_REPLY_REACTION)}/@me`;
+function reactionPath(channelId: string, messageId: string, reaction: string): string {
+  return `/channels/${channelId}/messages/${messageId}/reactions/${encodeURIComponent(reaction)}/@me`;
 }
 
 function webSocketCtor(): (new (url: string) => DiscordSocketLike) {
@@ -400,7 +407,7 @@ export class DiscordAdapter implements PlatformAdapter {
     this.replyReactions.set(key, state);
 
     try {
-      await this.discordFetch(reactionPath(channelId, messageId), {
+      await this.discordFetch(reactionPath(channelId, messageId, DISCORD_PROCESSING_REACTION), {
         method: "PUT",
       });
       state.added = true;
@@ -409,12 +416,12 @@ export class DiscordAdapter implements PlatformAdapter {
         error: (error as Error).message,
         channelId,
         messageId,
-        reaction: DISCORD_REPLY_REACTION,
+        reaction: DISCORD_PROCESSING_REACTION,
       });
     }
   }
 
-  async endResponse(replyCtx: unknown): Promise<void> {
+  async endResponse(replyCtx: unknown, result: PlatformResponseResult): Promise<void> {
     const { channelId, messageId } = this.getReplyContext(replyCtx);
     const key = replyReactionCacheKey(channelId, messageId);
     const state = this.replyReactions.get(key);
@@ -429,11 +436,14 @@ export class DiscordAdapter implements PlatformAdapter {
 
     this.replyReactions.delete(key);
     if (!state.added) {
+      if (result.status === "completed") {
+        await this.addCompletedReaction(channelId, messageId);
+      }
       return;
     }
 
     try {
-      await this.discordFetch(reactionPath(channelId, messageId), {
+      await this.discordFetch(reactionPath(channelId, messageId, DISCORD_PROCESSING_REACTION), {
         method: "DELETE",
       });
     } catch (error) {
@@ -441,8 +451,12 @@ export class DiscordAdapter implements PlatformAdapter {
         error: (error as Error).message,
         channelId,
         messageId,
-        reaction: DISCORD_REPLY_REACTION,
+        reaction: DISCORD_PROCESSING_REACTION,
       });
+    }
+
+    if (result.status === "completed") {
+      await this.addCompletedReaction(channelId, messageId);
     }
   }
 
@@ -816,6 +830,21 @@ export class DiscordAdapter implements PlatformAdapter {
       channelId,
       messageId,
     };
+  }
+
+  private async addCompletedReaction(channelId: string, messageId: string): Promise<void> {
+    try {
+      await this.discordFetch(reactionPath(channelId, messageId, DISCORD_COMPLETED_REACTION), {
+        method: "PUT",
+      });
+    } catch (error) {
+      this.logger.warn("failed to add discord completed reaction", {
+        error: (error as Error).message,
+        channelId,
+        messageId,
+        reaction: DISCORD_COMPLETED_REACTION,
+      });
+    }
   }
 
   private async sendToChannel(channelId: string, content: string, replyToMessageId?: string): Promise<void> {

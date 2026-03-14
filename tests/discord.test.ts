@@ -374,8 +374,9 @@ describe("discord adapter", () => {
     });
   });
 
-  test("beginResponse adds a discord reaction and endResponse removes it", async () => {
+  test("beginResponse adds a processing reaction and completed endResponse swaps it to a 100 reaction", async () => {
     const fetchMock = vi.fn()
+      .mockResolvedValueOnce(createFetchResponse({ status: 204 }))
       .mockResolvedValueOnce(createFetchResponse({ status: 204 }))
       .mockResolvedValueOnce(createFetchResponse({ status: 204 }));
     vi.stubGlobal("fetch", fetchMock);
@@ -387,9 +388,9 @@ describe("discord adapter", () => {
     };
 
     await adapter.beginResponse(replyContext);
-    await adapter.endResponse(replyContext);
+    await adapter.endResponse(replyContext, { status: "completed" });
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
       "https://discord.com/api/v10/channels/channel-1/messages/message-1/reactions/%F0%9F%91%80/@me",
@@ -402,6 +403,13 @@ describe("discord adapter", () => {
       "https://discord.com/api/v10/channels/channel-1/messages/message-1/reactions/%F0%9F%91%80/@me",
       expect.objectContaining({
         method: "DELETE",
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "https://discord.com/api/v10/channels/channel-1/messages/message-1/reactions/%F0%9F%92%AF/@me",
+      expect.objectContaining({
+        method: "PUT",
       }),
     );
   });
@@ -440,8 +448,9 @@ describe("discord adapter", () => {
     });
   });
 
-  test("nested beginResponse/endResponse only add and remove one discord reaction", async () => {
+  test("nested beginResponse/endResponse only add one processing reaction and one 100 reaction", async () => {
     const fetchMock = vi.fn()
+      .mockResolvedValueOnce(createFetchResponse({ status: 204 }))
       .mockResolvedValueOnce(createFetchResponse({ status: 204 }))
       .mockResolvedValueOnce(createFetchResponse({ status: 204 }));
     vi.stubGlobal("fetch", fetchMock);
@@ -454,13 +463,13 @@ describe("discord adapter", () => {
 
     await adapter.beginResponse(replyContext);
     await adapter.beginResponse(replyContext);
-    await adapter.endResponse(replyContext);
-    await adapter.endResponse(replyContext);
+    await adapter.endResponse(replyContext, { status: "completed" });
+    await adapter.endResponse(replyContext, { status: "completed" });
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  test("endResponse skips removing the reaction when beginResponse could not add it", async () => {
+  test("failed endResponse does not add the 100 reaction", async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       createFetchResponse({
         ok: false,
@@ -477,7 +486,7 @@ describe("discord adapter", () => {
     };
 
     await adapter.beginResponse(replyContext);
-    await adapter.endResponse(replyContext);
+    await adapter.endResponse(replyContext, { status: "failed" });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });

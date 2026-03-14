@@ -3,7 +3,15 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import type { AgentAdapter, AgentEvent, AgentSession, DeliveryTarget, InboundMessage, PlatformAdapter } from "../src/runtime/types.js";
+import type {
+  AgentAdapter,
+  AgentEvent,
+  AgentSession,
+  DeliveryTarget,
+  InboundMessage,
+  PlatformAdapter,
+  PlatformResponseResult,
+} from "../src/runtime/types.js";
 import { Logger } from "../src/logging.js";
 import { createLoopStore, LoopScheduler } from "../src/scheduler/loop.js";
 
@@ -143,8 +151,8 @@ class FakePlatform implements PlatformAdapter {
     this.lifecycleEvents.push(`begin:${String((replyContext as { messageId?: string }).messageId ?? "")}`);
   }
 
-  async endResponse(replyContext: unknown): Promise<void> {
-    this.lifecycleEvents.push(`end:${String((replyContext as { messageId?: string }).messageId ?? "")}`);
+  async endResponse(replyContext: unknown, result: PlatformResponseResult): Promise<void> {
+    this.lifecycleEvents.push(`end:${String((replyContext as { messageId?: string }).messageId ?? "")}:${result.status}`);
   }
 
   async reply(replyContext: unknown, content: string): Promise<void> {
@@ -401,7 +409,7 @@ describe("runtime integration", () => {
       "begin:om_1",
       "reply:echo:ping",
       "reply:done:ping",
-      "end:om_1",
+      "end:om_1:completed",
     ]);
 
     await runtime.stop();

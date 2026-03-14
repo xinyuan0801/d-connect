@@ -1,4 +1,12 @@
-import type { LoopJob, DeliveryTarget, InboundMessage, JobExecutor, PlatformAdapter, TurnResult } from "../core/types.js";
+import type {
+  LoopJob,
+  DeliveryTarget,
+  InboundMessage,
+  JobExecutor,
+  PlatformAdapter,
+  PlatformResponseResult,
+  TurnResult,
+} from "../core/types.js";
 import type { ResolvedAppConfig } from "../config/normalize.js";
 import type { SessionRecord } from "./session-repository.js";
 import { Logger } from "../infra/logging/logger.js";
@@ -215,13 +223,17 @@ export class DaemonRuntime implements JobExecutor {
     }
   }
 
-  private async endPlatformResponse(platform: PlatformAdapter, replyContext: unknown): Promise<void> {
+  private async endPlatformResponse(
+    platform: PlatformAdapter,
+    replyContext: unknown,
+    result: PlatformResponseResult,
+  ): Promise<void> {
     if (!platform.endResponse) {
       return;
     }
 
     try {
-      await platform.endResponse(replyContext);
+      await platform.endResponse(replyContext, result);
     } catch (error) {
       this.logger.warn("platform endResponse hook failed", {
         platform: platform.name,
@@ -258,6 +270,9 @@ export class DaemonRuntime implements JobExecutor {
     }
 
     await this.beginPlatformResponse(platform, message.replyContext);
+    let responseResult: PlatformResponseResult = {
+      status: "failed",
+    };
     try {
       if (runtime.config.guard?.enabled === true && !isSlashCommandMessage(message.content)) {
         const decision = await this.guardService.evaluate(runtime, {
@@ -279,6 +294,9 @@ export class DaemonRuntime implements JobExecutor {
             content: message.content,
           });
           await this.relay.reply(platform, message.replyContext, response);
+          responseResult = {
+            status: "completed",
+          };
           return;
         }
       }
@@ -297,8 +315,11 @@ export class DaemonRuntime implements JobExecutor {
           deliveryTarget: message.deliveryTarget,
         },
       );
+      responseResult = {
+        status: "completed",
+      };
     } finally {
-      await this.endPlatformResponse(platform, message.replyContext);
+      await this.endPlatformResponse(platform, message.replyContext, responseResult);
     }
   }
 
