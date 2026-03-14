@@ -374,14 +374,16 @@ describe("discord adapter", () => {
     });
   });
 
-  test("reply posts a discord message reference to the original message", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      createFetchResponse({
-        jsonBody: {
-          id: "reply-1",
-        },
-      }),
-    );
+  test("reply adds a reaction and posts a discord message reference to the original message", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(createFetchResponse({ status: 204 }))
+      .mockResolvedValueOnce(
+        createFetchResponse({
+          jsonBody: {
+            id: "reply-1",
+          },
+        }),
+      );
     vi.stubGlobal("fetch", fetchMock);
 
     const adapter = createAdapter();
@@ -393,8 +395,16 @@ describe("discord adapter", () => {
       "hello",
     );
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "https://discord.com/api/v10/channels/channel-1/messages/message-1/reactions/%F0%9F%91%80/@me",
+      expect.objectContaining({
+        method: "PUT",
+      }),
+    );
+
+    const body = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
     expect(body).toEqual({
       content: "hello",
       allowed_mentions: {
@@ -406,5 +416,54 @@ describe("discord adapter", () => {
         fail_if_not_exists: false,
       },
     });
+  });
+
+  test("reply adds the reaction only once for repeated replies to the same discord message", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(createFetchResponse({ status: 204 }))
+      .mockResolvedValueOnce(createFetchResponse({ jsonBody: { id: "reply-1" } }))
+      .mockResolvedValueOnce(createFetchResponse({ jsonBody: { id: "reply-2" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = createAdapter();
+    const replyContext = {
+      channelId: "channel-1",
+      messageId: "message-1",
+    };
+
+    await adapter.reply(replyContext, "hello");
+    await adapter.reply(replyContext, "world");
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const reactionCalls = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes("/reactions/%F0%9F%91%80/@me")
+    );
+    expect(reactionCalls).toHaveLength(1);
+  });
+
+  test("reply still posts a discord reply when adding the reaction fails", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        createFetchResponse({
+          ok: false,
+          status: 403,
+          bodyText: "missing permissions",
+        }),
+      )
+      .mockResolvedValueOnce(createFetchResponse({ jsonBody: { id: "reply-1" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = createAdapter();
+
+    await expect(adapter.reply(
+      {
+        channelId: "channel-1",
+        messageId: "message-1",
+      },
+      "hello",
+    )).resolves.toBeUndefined();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe("https://discord.com/api/v10/channels/channel-1/messages");
   });
 });
