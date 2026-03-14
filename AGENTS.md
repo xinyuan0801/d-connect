@@ -18,6 +18,7 @@
 - 本项目导入路径遵循 ESM 约定，TypeScript 源文件内部也使用 `./foo.js` 这样的后缀。
 - 配置文件格式是严格 `JSON`，不是 JSONC。
 - 运行数据目录固定为 `.d-connect/`，不再支持 `dataDir` 配置项；规则是“普通配置文件 -> 配置文件同级 `.d-connect`，若配置文件本身位于 `.d-connect/config.json` -> 直接复用该目录”。
+- 运行时会在启动时自动解析日志、data 目录与 IPC socket 路径；`start` 为常驻 daemon 命令，适用于后台长期运行。
 
 ## 常用命令
 
@@ -28,9 +29,11 @@ pnpm test
 pnpm run dev init -c ./config.json
 pnpm run dev add -c ./config.json
 pnpm run dev start -c ./config.json
+pnpm run dev restart -c ./config.json
 node dist/index.js init -c ./config.json
 node dist/index.js add -c ./config.json
 node dist/index.js start -c ./config.json
+node dist/index.js restart -c ./config.json
 ```
 
 常见本地联调：
@@ -39,6 +42,8 @@ node dist/index.js start -c ./config.json
 pnpm run dev send -p <project> -s local:debug "hello"
 pnpm run dev loop add -p <project> -s local:debug -e "*/30 * * * * *" "status"
 pnpm run dev loop list -p <project>
+pnpm run dev loop del -p <project> -i <job-id>
+pnpm run dev restart -c ./config.json
 ```
 
 ## 发布流程
@@ -58,7 +63,8 @@ pnpm run dev loop list -p <project>
 - `src/config/**`：配置路径解析、模板生成、Zod schema 校验与 normalize。
 - `src/adapters/agent/**`：各类 Agent CLI 适配器、共享 `BaseCliSession`、输出解析。
 - `src/adapters/platform/**`：IM 平台适配器，以及平台共享的 allow-list / delivery-target 能力。
-- `src/ipc/**`：对外 IPC server/client；路由表位于 `src/infra/ipc/router.ts`。
+- `src/ipc/**`：对外 IPC client/server、socket endpoint、类型定义。
+- `src/infra/ipc/router.ts`：IPC 路由分发（`/send`、`/loop/add`、`/loop/list`、`/loop/del`、`/daemon/stop`）。
 - `src/scheduler/loop.ts`：定时任务调度与持久化编排，依赖 `JobExecutor` 接口。
 - `src/infra/**`：logging、JSON 文件原子写入、IPC router 等基础设施。
 - `tests/**`：Vitest 测试，整体以模块级单测为主。
@@ -73,6 +79,20 @@ pnpm run dev loop list -p <project>
 5. `DaemonRuntime` -> `ProjectRegistry` / `ConversationService` / `CommandService` / `MessageRelay`
 6. 平台入站消息统一转换成 `InboundMessage`
 7. 异步回投使用持久化 `DeliveryTarget`，不再依赖进程内存中的 reply context
+
+### 配置与运行约束
+
+- `start` 时若配置不存在，会先创建模板并退出（提示用户先完善配置）。
+- `resolveConfigPath()` 默认查找顺序：当前目录 `./config.json`，再回退到 `$HOME/.d-connect/config.json`。
+- `resolveConfigPathByProject()` 除了严格 `config.json`，也会识别 `config.<name>.json` 这类同名变体，用于项目查找；若匹配多个会报歧义。
+- Windows 下 IPC 使用命名管道，不是固定 `ipc.sock` 文件；Linux/mac 以 `.d-connect/ipc.sock`。
+
+### 命令约定
+
+- `init` / `add` / `start` 使用 `-c/--config` 指定配置文件路径；不带 `-c` 时按默认路径查找。
+- `send` 与 `loop` 子命令的 `-p/--project` 在缺少 `-c` 时会反查项目所在配置。
+- `loop del` 需要 `-i/--id`，`loop add` 可通过 `--silent` 禁止异步回投。
+- `restart` 通过 IPC stop 路径实现平滑重启；老 daemon 无 `daemon/stop` 路由时会回退到按 socket owner 杀进程。
 
 ## 代码约定
 
