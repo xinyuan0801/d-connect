@@ -44,7 +44,7 @@
 | 类别 | 当前支持 |
 | --- | --- |
 | IM 平台 | `DingTalk`、`Discord` |
-| Agent CLI | `claudecode`、`codex`、`qoder`、`iflow` |
+| Agent CLI | `claudecode`、`codex`、`opencode`、`qoder`、`iflow` |
 | 运行环境 | Node.js `>=22` |
 
 ## 5 分钟跑通
@@ -52,7 +52,7 @@
 ### 前置要求
 
 - Node.js `>=22`
-- 已安装并能直接执行至少一个 Agent CLI：`claude`、`codex`、`qodercli` 或 `iflow`
+- 已安装并能直接执行至少一个 Agent CLI：`claude`、`codex`、`opencode`、`qodercli` 或 `iflow`
 - 如果要接真实 IM，还需要对应平台的机器人凭证
 - DingTalk 凭证获取[参考](https://github.com/xinyuan0801/d-connect/blob/main/docs/dingtalk_credential.md)
 - Discord 凭证获取[参考](https://github.com/xinyuan0801/d-connect/blob/main/docs/discord_credential.md)
@@ -156,12 +156,25 @@ d-connect start
 }
 ```
 
+如果你想接 `OpenCode CLI`，可以把 `agent` 改成下面这样：
+
+```json
+{
+  "type": "opencode",
+  "options": {
+    "workDir": "/path/to/repo",
+    "cmd": "opencode",
+    "model": "anthropic/claude-sonnet-4"
+  }
+}
+```
+
 ### 关键字段
 
 | 字段 | 含义 |
 | --- | --- |
 | `name` | 项目名，后续命令通过 `-p` 使用 |
-| `agent.type` | Agent CLI 类型，当前支持 `claudecode` / `codex` / `qoder` / `iflow` |
+| `agent.type` | Agent CLI 类型，当前支持 `claudecode` / `codex` / `opencode` / `qoder` / `iflow` |
 | `agent.options.workDir` | Agent 实际工作的仓库目录 |
 | `agent.options.cmd` | 可执行命令名或完整路径 |
 | `agent.options.model` | Agent 使用的模型名；留空则走对应 CLI 默认值 |
@@ -188,6 +201,13 @@ d-connect start
 - 非交互执行走 `codex exec --json`，续聊走 `codex exec resume <thread_id> ...`。
 - `mode: "full-auto"` 会映射到 `--full-auto`，`mode: "yolo"` 会映射到 `--dangerously-bypass-approvals-and-sandbox`。
 - `reasoning_effort` 会映射到当前 CLI 的 `-c model_reasoning_effort="..."` 配置覆盖。
+
+### OpenCode 适配补充
+
+- 当前 `opencode` 适配按本机验证过的 `opencode-ai 1.2.26` CLI 接入。
+- 非交互执行走 `opencode run --format json`，续聊走 `opencode run --session <session_id> <prompt>`。
+- 会话 ID 与消息内容从 CLI 的顶层 `sessionID` / `part` 流式事件里提取。
+- `agent.options.model` 会映射到 `--model`。
 
 ## 聊天内命令
 

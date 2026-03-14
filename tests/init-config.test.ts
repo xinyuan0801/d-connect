@@ -91,6 +91,30 @@ describe("init config", () => {
     });
   });
 
+  test("buildConfigFromAnswers supports opencode defaults", () => {
+    const config = buildConfigFromAnswers({
+      ...defaultInitAnswers(),
+      projectName: "opencode-service",
+      agentType: "opencode",
+      agentCmd: "opencode",
+      agentWorkDir: "/tmp/repo",
+      agentModel: "",
+      platformType: "dingtalk",
+      dingtalkClientId: "ding123",
+      dingtalkClientSecret: "secret123",
+      dingtalkProcessingNotice: "处理中...",
+      allowFrom: "*",
+    });
+
+    expect(config.projects[0]?.agent).toEqual({
+      type: "opencode",
+      options: {
+        workDir: "/tmp/repo",
+        cmd: "opencode",
+      },
+    });
+  });
+
   test("inferProjectNameFromWorkDir sanitizes workspace name", () => {
     expect(inferProjectNameFromWorkDir("/tmp/my repo")).toBe("my-repo");
     expect(inferProjectNameFromWorkDir("")).toBe("my-backend");

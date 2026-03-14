@@ -48,6 +48,13 @@ const codexAgentSchema = z
   })
   .strict();
 
+const opencodeAgentSchema = z
+  .object({
+    type: z.literal("opencode"),
+    options: baseAgentOptionsSchema.default({}),
+  })
+  .strict();
+
 const qoderAgentSchema = z
   .object({
     type: z.literal("qoder"),
@@ -65,6 +72,7 @@ const iflowAgentSchema = z
 const agentSchema = z.discriminatedUnion("type", [
   claudecodeAgentSchema,
   codexAgentSchema,
+  opencodeAgentSchema,
   qoderAgentSchema,
   iflowAgentSchema,
 ]);

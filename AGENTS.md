@@ -2,7 +2,7 @@
 
 ## 项目定位
 
-`d-connect` 是一个本地守护进程，用于把本机 Agent CLI（`claudecode`、`codex`、`qoder`、`iflow`）桥接到 IM 平台（当前支持 `DingTalk`、`Discord`），并通过本地 IPC 和 loop 能力管理会话与定时任务。
+`d-connect` 是一个本地守护进程，用于把本机 Agent CLI（`claudecode`、`codex`、`opencode`、`qoder`、`iflow`）桥接到 IM 平台（当前支持 `DingTalk`、`Discord`），并通过本地 IPC 和 loop 能力管理会话与定时任务。
 
 ## 技术栈与运行约束
 
@@ -104,6 +104,13 @@ pnpm run dev loop list -p <project>
 - `reasoning_effort` 通过 `-c model_reasoning_effort="..."` 传递，不是独立 flag
 - `mode` 目前只映射 `suggest` / `full-auto` / `yolo`
 
+当前已落地的 `opencode` 适配补充：
+
+- 当前实现按本机验证过的 `opencode-ai 1.2.26` CLI 接入
+- 非交互执行命令形态是 `opencode run --format json`
+- 续聊使用 `opencode run --session <session_id> <prompt>`
+- 会话 ID 与消息内容主要从 CLI 顶层 `sessionID` / `part` 事件流里提取
+
 ### 新增 IM 平台支持
 
 通常需要同时修改：
@@ -182,4 +189,5 @@ pnpm run build
 - 不要引入新的框架级依赖，除非确有必要且与当前架构一致。
 - 若用户要求只是补文档或配置说明，避免顺带修改业务逻辑。
 - 若改动影响用户可见命令、配置字段或平台行为，同时更新 `README.md`。
+- 不要对被 `.gitignore` 命中的本地调试配置使用 `git add -f`；例如 `config.*.local.json` 应只保留在本地，不进入仓库。
 - 在开发过程中，若发现有意义的重要链路（如关键调用链、排障路径、联调步骤），允许并建议同步更新 `AGENTS.md` 进行沉淀，且内容需与当前实现保持一致。

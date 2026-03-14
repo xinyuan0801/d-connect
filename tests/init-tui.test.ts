@@ -162,6 +162,15 @@ describe("init tui helpers", () => {
       "confirm",
     ]);
 
+    const agentTypeStep = buildWizardSteps({}, options).find((step) => step.id === "agentType");
+    expect(agentTypeStep?.options?.map((option) => option.value)).toEqual([
+      "claudecode",
+      "codex",
+      "opencode",
+      "qoder",
+      "iflow",
+    ]);
+
     const workDirModeStep = buildWizardSteps({}, options).find((step) => step.id === "agentWorkDirMode");
     expect(workDirModeStep?.title).toBe("工作目录");
     expect(workDirModeStep?.label).toBe("Agent 应该在哪个目录里运行？");
@@ -195,6 +204,27 @@ describe("init tui helpers", () => {
     const clientSecretStep = buildWizardSteps({}, options).find((step) => step.id === "dingtalkClientSecret");
     expect(clientSecretStep?.defaultValue).toBe("");
     expect(clientSecretStep?.placeholder).toBe("请输入 client secret");
+  });
+
+  test("buildWizardOverview uses opencode default command", () => {
+    const defaults = defaultInitAnswers({ cwd: "/repo/workdir" });
+    const options = {
+      defaults,
+      configPath: "/repo/config.json",
+      overwritten: false,
+      stdin: process.stdin,
+      stdout: process.stdout,
+      deriveProjectName: (workDir: string, fallback?: string) => fallback ?? workDir,
+    };
+
+    const overview = buildWizardOverview(
+      {
+        agentType: "opencode",
+      },
+      options,
+    );
+
+    expect(overview.find((item) => item.label === "agent.options.cmd")?.value).toBe("opencode");
   });
 
   test("buildWizardSteps adds path input only when custom workdir is selected", () => {
