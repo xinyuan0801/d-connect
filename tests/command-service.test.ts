@@ -363,7 +363,8 @@ describe("command service", () => {
     if (result.kind === "forward_to_agent") {
       expect(result.prompt).toContain('d-connect loop add -p "demo" -s "local:alice" -e "<scheduleExpr>" "<prompt>"');
       expect(result.prompt).toContain('d-connect loop list -p "demo"');
-      expect(result.prompt).toContain('d-connect loop del -i "<jobId>" -c <configPath>');
+      expect(result.prompt).toContain('d-connect loop del -i "<jobId>"');
+      expect(result.prompt).not.toContain("<configPath>");
       expect(result.prompt).toContain("`<prompt>` 只能写任务动作本身");
       expect(result.prompt).toContain('示例：用户请求“每天晚上8点22介绍一下自己” -> d-connect loop add -p "demo" -s "local:alice" -e "22 20 * * *" "介绍一下自己"');
       expect(result.prompt).not.toContain("pnpm run dev");
@@ -469,6 +470,24 @@ describe("command service", () => {
     );
 
     expect(output).toBe("用法：/loop add <expr> <prompt>。cron 不写对，时间也只会装作路过。");
+  });
+
+  test("rejects invalid one-token loop schedule input before scheduling", async () => {
+    const { service, conversation, runtime, loop } = await createHarness();
+    const session = conversation.getOrCreateActiveSession("demo", "local:alice");
+
+    const output = expectHandled(
+      await service.handle({
+        runtime,
+        project: "demo",
+        sessionKey: "local:alice",
+        session,
+        raw: "/loop add every check status",
+      }),
+    );
+
+    expect(output).toBe("用法：/loop add <expr> <prompt>。cron 不写对，时间也只会装作路过。");
+    expect(loop.list("demo")).toHaveLength(0);
   });
 
   test("uses five-part cron expression branch for natural language loop parse", async () => {

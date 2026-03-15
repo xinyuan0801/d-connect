@@ -1,6 +1,6 @@
 {
   "name": "@xinyuan0801/d-connect",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "type": "module",
   "description": "Bridge local coding agents to IM platforms",
   "license": "MIT",

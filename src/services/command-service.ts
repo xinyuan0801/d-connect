@@ -30,7 +30,7 @@ export type CommandResult = HandledCommandResult | ForwardCommandResult;
 
 function parseLoopAddInput(raw: string): { scheduleExpr: string; prompt: string } | null {
   const tokens = raw.trim().split(/\s+/).slice(2);
-  for (const fieldCount of [6, 5, 1]) {
+  for (const fieldCount of [6, 5]) {
     if (tokens.length <= fieldCount) {
       continue;
     }
@@ -39,7 +39,7 @@ function parseLoopAddInput(raw: string): { scheduleExpr: string; prompt: string 
     if (!prompt) {
       continue;
     }
-    if (fieldCount === 1 || cron.validate(scheduleExpr)) {
+    if (cron.validate(scheduleExpr)) {
       return { scheduleExpr, prompt };
     }
   }
@@ -65,6 +65,9 @@ function buildLoopCommandPrompt(project: string, sessionKey: string, request: st
   const listCommand = normalizedConfigPath
     ? `d-connect loop list -p ${quotedProject} -c ${configPathToken}`
     : `d-connect loop list -p ${quotedProject}`;
+  const deleteCommand = normalizedConfigPath
+    ? `d-connect loop del -i "<jobId>" -c ${configPathToken}`
+    : `d-connect loop del -i "<jobId>"`;
   const exampleAddCommand = normalizedConfigPath
     ? `d-connect loop add -p ${quotedProject} -s ${quotedSessionKey} -e "22 20 * * *" -c ${configPathToken} "介绍一下自己"`
     : `d-connect loop add -p ${quotedProject} -s ${quotedSessionKey} -e "22 20 * * *" "介绍一下自己"`;
@@ -85,7 +88,7 @@ function buildLoopCommandPrompt(project: string, sessionKey: string, request: st
     "请根据下面的请求判断应执行 add/list/del 哪个命令，并优先直接执行命令。",
     `可用命令(add)：${addCommand}`,
     `可用命令(list)：${listCommand}`,
-    `可用命令(del)：d-connect loop del -i "<jobId>" -c ${configPathToken}`,
+    `可用命令(del)：${deleteCommand}`,
     "当用户要求删除但未提供 jobId 时，先执行 list，再基于用户确认的 jobId 执行 del。",
     "重要：`<prompt>` 只能写任务动作本身，不能包含任何时间/频率/cron 信息（例如“每天、每周、8点22分、22 20 * * *”）。",
     "调度信息只放在 `-e`，`<prompt>` 只保留可执行动作。",
