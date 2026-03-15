@@ -129,4 +129,49 @@ describe("dingtalk content", () => {
       ],
     });
   });
+
+  test("normalize markdown title for long headings and code-fenced content", () => {
+    const longTitle = "标题".repeat(50);
+    expect(buildDingTalkReplyPayload(`\n## ${longTitle}\n\n内容`)).toEqual({
+      msgtype: "markdown",
+      markdown: {
+        title: `${longTitle.slice(0, 61)}...`,
+        text: `\n## ${longTitle}\n\n内容`,
+      },
+    });
+
+    expect(buildDingTalkReplyPayload("```ts\nconsole.log('x')\n```")).toEqual({
+      msgtype: "markdown",
+      markdown: {
+        title: "reply",
+        text: "```ts\nconsole.log('x')\n```",
+      },
+    });
+  });
+
+  test("buildDingTalkReplyPayload handles inline tool status variants and table markdown", () => {
+    expect(buildDingTalkReplyPayload("🛠️ test\n`echo\\` hi`")).toEqual({
+      msgtype: "markdown",
+      markdown: {
+        title: "🛠️ test",
+        text: "🛠️ test\n```json\necho\\` hi\n```",
+      },
+    });
+
+    expect(buildDingTalkReplyPayload("| name | value |\n| --- | --- |\n| foo | bar |\n")).toEqual({
+      msgtype: "markdown",
+      markdown: {
+        title: "| name | value |",
+        text: "| name | value |\n| --- | --- |\n| foo | bar |\n",
+      },
+    });
+
+    expect(buildDingTalkRobotSendPayload("🛠️ test\n`echo\\` hi`")).toEqual({
+      msgKey: "sampleMarkdown",
+      msgParam: JSON.stringify({
+        title: "🛠️ test",
+        text: "🛠️ test\n```json\necho\\` hi\n```",
+      }),
+    });
+  });
 });

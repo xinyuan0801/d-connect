@@ -365,4 +365,122 @@ describe("command service", () => {
       expect(result.prompt).toContain(`d-connect loop del -i "<jobId>" -c "${absolutePath}"`);
     }
   });
+
+  test("returns handled output when loop feature is unavailable", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "d-connect-command-no-loop-"));
+    const sessions = await createSessionStore(dataDir);
+    const conversation = new ConversationService(sessions, new Logger("error"));
+    const service = new CommandService(conversation);
+    const runtime: ProjectRuntime = {
+      config: {
+        name: "demo",
+        agent: {
+          type: "claudecode",
+          options: {},
+        },
+        guard: {
+          enabled: false,
+        },
+        platforms: [],
+      },
+      agent: new FakeAgent(),
+      platforms: [],
+      platformMap: new Map(),
+      sessions: new Map(),
+    };
+    const session = conversation.getOrCreateActiveSession("demo", "local:alice");
+
+    const output = expectHandled(
+      await service.handle({
+        runtime,
+        project: "demo",
+        sessionKey: "local:alice",
+        session,
+        raw: "/loop add */10 * * * * * check status",
+      }),
+    );
+
+    expect(output).toBe("当前没启用 loop 调度器。这台机器暂时还不会自己惦记事情。");
+  });
+
+  test("reports loop parse errors when no schedule can be resolved", async () => {
+    const { service, conversation, runtime } = await createHarness();
+    const session = conversation.getOrCreateActiveSession("demo", "local:alice");
+
+    const output = expectHandled(
+      await service.handle({
+        runtime,
+        project: "demo",
+        sessionKey: "local:alice",
+        session,
+        raw: "/loop add",
+      }),
+    );
+
+    expect(output).toBe("用法：/loop add <expr> <prompt>。cron 不写对，时间也只会装作路过。");
+  });
+
+  test("uses five-part cron expression branch for natural language loop parse", async () => {
+    const { service, conversation, runtime, loop } = await createHarness();
+    const session = conversation.getOrCreateActiveSession("demo", "local:alice");
+
+    const output = expectHandled(
+      await service.handle({
+        runtime,
+        project: "demo",
+        sessionKey: "local:alice",
+        session,
+        raw: "/loop add 0 9 * * * check build status",
+      }),
+    );
+    expect(output).toContain("已创建 loop：");
+
+    const jobs = loop.list("demo");
+    const job = jobs.find((item) => item.prompt === "check build status");
+    expect(job?.scheduleExpr).toBe("0 9 * * *");
+  });
+
+  test("returns usage when list is called but no jobs exist", async () => {
+    const { service, conversation, runtime } = await createHarness();
+    const session = conversation.getOrCreateActiveSession("demo", "local:alice");
+
+    const output = expectHandled(
+      await service.handle({
+        runtime,
+        project: "demo",
+        sessionKey: "local:alice",
+        session,
+        raw: "/loop list",
+      }),
+    );
+
+    expect(output).toBe("当前没有 loop 任务。说明定时打扰功能还算克制。");
+  });
+
+  test("returns usage for /loop del without id and error for unknown target", async () => {
+    const { service, conversation, runtime } = await createHarness();
+    const session = conversation.getOrCreateActiveSession("demo", "local:alice");
+
+    const delUsage = expectHandled(
+      await service.handle({
+        runtime,
+        project: "demo",
+        sessionKey: "local:alice",
+        session,
+        raw: "/loop del",
+      }),
+    );
+    expect(delUsage).toBe("用法：/loop del <id>。不给 ID，我也不敢乱删，毕竟还想活。");
+
+    const delMissing = expectHandled(
+      await service.handle({
+        runtime,
+        project: "demo",
+        sessionKey: "local:alice",
+        session,
+        raw: "/switch missing-session",
+      }),
+    );
+    expect(delMissing).toContain("没找到会话：missing-session。它可能改名了，也可能从没存在过。");
+  });
 });

@@ -405,4 +405,66 @@ describe("config loader", () => {
 
     expect(resolved.dataDir).toBe(configDir);
   });
+
+  test("loadConfig reports json parse errors", async () => {
+    const root = await mkdtemp(join(tmpdir(), "d-connect-config-"));
+    const path = join(root, "invalid.json");
+    await writeFile(path, "{bad json", "utf8");
+
+    await expect(loadConfig(path)).rejects.toThrow(/config parse error/);
+  });
+
+  test("loadConfig rejects legacy cron field rename", async () => {
+    const root = await mkdtemp(join(tmpdir(), "d-connect-config-legacy-"));
+    const path = join(root, "config.json");
+    const payload = JSON.parse(validConfigJson());
+    (payload as any).cron = { schedule: "*/10 * * * * *" };
+    await writeFile(path, `${JSON.stringify(payload)}\n`, "utf8");
+
+    await expect(loadConfig(path)).rejects.toThrow(/\"cron\" has been renamed to \"loop\"/);
+  });
+
+  test("resolveConfigPathByProject skips unreadable directories via candidate scanning", async () => {
+    const root = await mkdtemp(join(tmpdir(), "d-connect-config-unreadable-"));
+    const home = join(root, "home");
+    await mkdir(home, { recursive: true });
+    const projectPayload = JSON.parse(validConfigJson());
+    projectPayload.projects[0].name = "home-project";
+    const homeConfig = join(home, ".d-connect", "config.json");
+    await mkdir(join(home, ".d-connect"), { recursive: true });
+    await writeFile(homeConfig, `${JSON.stringify(projectPayload)}\n`, "utf8");
+
+    const missingDir = join(root, "does-not-exist");
+    const result = await resolveConfigPathByProject("home-project", { cwd: missingDir, homeDir: home });
+    expect(result).toEqual({
+      status: "matched",
+      path: homeConfig,
+    });
+  });
+
+  test("resolveConfigPathByProject ignores non-config candidates and returns not_found", async () => {
+    const root = await mkdtemp(join(tmpdir(), "d-connect-config-notfound-"));
+    const cwd = join(root, "workspace");
+    const home = join(root, "home");
+    await mkdir(cwd, { recursive: true });
+    await mkdir(home, { recursive: true });
+
+    const payload = JSON.parse(validConfigJson());
+    payload.projects[0].name = "workspace-project";
+    await writeFile(join(cwd, "config.json"), `${JSON.stringify(payload)}\n`, "utf8");
+
+    const payloadHome = JSON.parse(validConfigJson());
+    payloadHome.projects[0].name = "home-project";
+    const homeConfig = join(home, ".d-connect", "config.json");
+    await mkdir(join(home, ".d-connect"), { recursive: true });
+    await writeFile(homeConfig, `${JSON.stringify(payloadHome)}\n`, "utf8");
+
+    await mkdir(join(cwd, "logs"));
+    await writeFile(join(cwd, "notes.txt"), "not-a-config\n", "utf8");
+
+    const result = await resolveConfigPathByProject("missing-project", { cwd, homeDir: home });
+    expect(result).toEqual({
+      status: "not_found",
+    });
+  });
 });

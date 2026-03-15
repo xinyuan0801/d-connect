@@ -76,4 +76,20 @@ describe("platform adapters", () => {
 
     expect(adapter.name).toBe("discord");
   });
+
+  test("throws for unsupported platform type", () => {
+    expect(() =>
+      createPlatformAdapters(
+        createProject({
+          platforms: [
+            {
+              type: "legacy" as never,
+              options: {} as never,
+            },
+          ],
+        }),
+        new Logger("error"),
+      ),
+    ).toThrow("unsupported platform type: legacy");
+  });
 });

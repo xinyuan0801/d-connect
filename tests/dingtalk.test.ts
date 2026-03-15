@@ -1421,4 +1421,392 @@ describe("dingtalk adapter", () => {
     resolveHandler?.();
     await Promise.resolve();
   });
+
+  test("extracts quoted rich text when replied message carries richText content", () => {
+    const adapter = createAdapter();
+    const handler = vi.fn();
+
+    (adapter as any).handler = handler;
+
+    expect(
+      (adapter as any).onDownstream(
+        createDownstream(
+          createRobotMessage({
+            msgId: "quoted-richtext-msg",
+            text: {
+              content: "请继续",
+              isReplyMsg: true,
+              repliedMsg: {
+                msgType: "",
+                msgId: "quoted-msg-id",
+                content: {
+                  richText: [
+                    {
+                      type: "text",
+                      content: "引用内容",
+                    },
+                    {
+                      type: "emoji",
+                      content: "😊",
+                    },
+                    {
+                      type: "at",
+                      atName: "Alice",
+                    },
+                    {
+                      type: "picture",
+                    },
+                    {
+                      content: "尾巴",
+                    },
+                  ],
+                },
+              },
+            },
+          }),
+        ),
+      ),
+    ).toEqual({ status: EventAck.SUCCESS });
+
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining(
+          "[引用消息: \"引用内容😊@Alice[图片]尾巴\"]",
+        ),
+      }),
+    );
+  });
+
+  test("uses [DingTalk text] when inbound text is blank and has no media", () => {
+    const adapter = createAdapter();
+    const handler = vi.fn();
+
+    (adapter as any).handler = handler;
+
+    expect(
+      (adapter as any).onDownstream(
+        createDownstream(
+          createRobotMessage({
+            msgId: "blank-text-msg",
+            text: {
+              content: "   ",
+            },
+          }),
+        ),
+      ),
+    ).toEqual({ status: EventAck.SUCCESS });
+
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: "[text]",
+      }),
+    );
+  });
+
+  test("caches union id lookup results", async () => {
+    const adapter = createAdapter();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        createFetchResponse({
+          jsonBody: {
+            access_token: "token-union",
+            expires_in: 7200,
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        createFetchResponse({
+          jsonBody: {
+            errcode: 0,
+            result: {
+              unionid: "union-staff-1",
+            },
+          },
+        }),
+      );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = await (adapter as any).getUnionIdByStaffId("staff-1");
+    const second = await (adapter as any).getUnionIdByStaffId("staff-1");
+
+    expect(first).toBe("union-staff-1");
+    expect(second).toBe("union-staff-1");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  test("caches dingtalk group space lookup results", async () => {
+    const adapter = createAdapter();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        createFetchResponse({
+          jsonBody: {
+            access_token: "token-space",
+            expires_in: 7200,
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        createFetchResponse({
+          jsonBody: {
+            space: {
+              spaceId: "space-1",
+            },
+          },
+        }),
+      );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = await (adapter as any).getGroupFileSpaceId("conversation-1", "union-1");
+    const second = await (adapter as any).getGroupFileSpaceId("conversation-1", "union-1");
+
+    expect(first).toBe("space-1");
+    expect(second).toBe("space-1");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  test("finds a group file close to quoted message creation time", async () => {
+    const adapter = createAdapter();
+    const targetCreatedAt = Date.parse("2026-03-14T10:00:10+0800");
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        createFetchResponse({
+          jsonBody: {
+            access_token: "token-space-list",
+            expires_in: 7200,
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        createFetchResponse({
+          jsonBody: {
+            dentries: [
+              {
+                id: "skip-not-file",
+                type: "FOLDER",
+                name: "folder",
+                createTime: "Mon Mar 14 2026 10:00:08 CST",
+              },
+              {
+                id: "broken-time",
+                type: "FILE",
+                name: "broken.txt",
+                createTime: "not-a-time",
+              },
+              {
+                id: "matched-file",
+                type: "FILE",
+                name: "matched.txt",
+                createTime: "2026-03-14T10:00:11+0800",
+              },
+            ],
+          },
+        }),
+      );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await (adapter as any).findGroupFileByTimestamp(
+      "space-1",
+      "union-1",
+      targetCreatedAt,
+    );
+
+    expect(result).toEqual({
+      dentryId: "matched-file",
+      name: "matched.txt",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  test("resolves group quoted media through cached space id and file id", async () => {
+    const adapter = createAdapter();
+    const unionIdSpy = vi.spyOn(adapter as any, "getUnionIdByStaffId").mockResolvedValue("union-1");
+    const downloadSpy = vi.spyOn(adapter as any, "downloadGroupFile").mockResolvedValue({
+      path: "/tmp/resolved.bin",
+      contentType: "application/octet-stream",
+    });
+
+    const result = await (adapter as any).resolveQuotedMediaFromGroup(
+      createRobotMessage({
+        conversationType: "2",
+        senderStaffId: "staff-1",
+      }),
+      {
+        source: "quoted",
+        kind: "file",
+        spaceId: "space-1",
+        fileId: "file-1",
+        quotedMsgId: "quoted-1",
+        quotedCreatedAt: Date.parse("Mon Mar 14 2026 10:00:10 CST"),
+      },
+      {
+        downloadCode: "cached-dl",
+        msgType: "file",
+        createdAt: Date.parse("Mon Mar 14 2026 10:00:00 CST"),
+        expiresAt: Date.parse("Mon Mar 14 2026 10:10:00 CST"),
+        spaceId: "space-1",
+        fileId: "file-1",
+      },
+    );
+
+    expect(unionIdSpy).toHaveBeenCalledWith("staff-1");
+    expect(downloadSpy).toHaveBeenCalledWith("space-1", "file-1", "union-1");
+    expect(result).toEqual({
+      path: "/tmp/resolved.bin",
+      contentType: "application/octet-stream",
+    });
+  });
+
+  test("resolves group quoted media via listAll when cache has no file id", async () => {
+    const adapter = createAdapter();
+    vi.spyOn(adapter as any, "getUnionIdByStaffId").mockResolvedValue("union-2");
+    vi.spyOn(adapter as any, "getGroupFileSpaceId").mockResolvedValue("space-2");
+    vi.spyOn(adapter as any, "findGroupFileByTimestamp").mockResolvedValue({
+      dentryId: "dentry-2",
+      name: "group.txt",
+    });
+    const downloadSpy = vi.spyOn(adapter as any, "downloadGroupFile").mockResolvedValue({
+      path: "/tmp/group.txt",
+      contentType: "text/plain",
+    });
+
+    const result = await (adapter as any).resolveQuotedMediaFromGroup(
+      createRobotMessage({
+        conversationType: "2",
+        senderStaffId: "staff-2",
+      }),
+      {
+        source: "quoted",
+        kind: "file",
+        quotedMsgId: "quoted-2",
+        quotedCreatedAt: 1_700_000_000_000,
+      },
+      {
+        downloadCode: "cached-dl-2",
+        msgType: "file",
+        createdAt: 1_699_999_000_000,
+        expiresAt: 1_700_000_600_000,
+      },
+    );
+
+    expect(result).toEqual({
+      path: "/tmp/group.txt",
+      contentType: "text/plain",
+    });
+  });
+
+  test("does not resolve group quoted media for direct conversations", async () => {
+    const adapter = createAdapter();
+
+    const result = await (adapter as any).resolveQuotedMediaFromGroup(
+      createRobotMessage({
+        conversationType: "1",
+        senderStaffId: "staff-1",
+      }),
+      {
+        source: "quoted",
+        kind: "file",
+      },
+    );
+
+    expect(result).toBeNull();
+  });
+
+  test("returns null when group quoted media has no resolved file id and no timestamp", async () => {
+    const adapter = createAdapter();
+
+    const result = await (adapter as any).resolveQuotedMediaFromGroup(
+      createRobotMessage({
+        conversationType: "2",
+        senderStaffId: "",
+      }),
+      {
+        source: "quoted",
+        kind: "file",
+        quotedMsgId: "quoted-1",
+      },
+      {
+        downloadCode: "cached-dl",
+        msgType: "file",
+        createdAt: Date.parse("Mon Mar 14 2026 10:00:00 CST"),
+        expiresAt: Date.parse("Mon Mar 14 2026 10:10:00 CST"),
+      },
+    );
+
+    expect(result).toBeNull();
+  });
+
+  test("downloads group files by dentry and saves to inbound media directory", async () => {
+    const inboundMediaDir = await mkdtemp(join(tmpdir(), "d-connect-dingtalk-"));
+    tempDirs.push(inboundMediaDir);
+
+    const adapter = createAdapter({ inboundMediaDir });
+    const fileBytes = new Uint8Array([1, 2, 3, 4]).buffer;
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        createFetchResponse({
+          jsonBody: {
+            access_token: "token-group-file",
+            expires_in: 7200,
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        createFetchResponse({
+          jsonBody: {
+            headerSignatureInfo: {
+              resourceUrls: ["https://files.example.com/group.doc"],
+              headers: {
+                "content-type": "video/mp4",
+              },
+            },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        createFetchResponse({
+          arrayBufferBody: fileBytes,
+          headers: {
+            "content-type": "video/mp4",
+          },
+        }),
+      );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await (adapter as any).downloadGroupFile("space-1", "file-1", "union-1");
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(result.contentType).toBe("video/mp4");
+    expect(result.path).toContain(inboundMediaDir);
+    await expect(readFile(result.path)).resolves.toEqual(Buffer.from(fileBytes));
+  });
+
+  test("throws when group file downloadInfos result lacks resource URL", async () => {
+    const adapter = createAdapter();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        createFetchResponse({
+          jsonBody: {
+            access_token: "token-group-file-empty",
+            expires_in: 7200,
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        createFetchResponse({
+          jsonBody: {
+            headerSignatureInfo: {},
+          },
+        }),
+      );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect((adapter as any).downloadGroupFile("space-1", "file-1", "union-1")).rejects.toThrow(
+      "storage downloadInfos/query returned no resourceUrl",
+    );
+  });
 });

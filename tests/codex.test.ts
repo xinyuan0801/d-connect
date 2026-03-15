@@ -137,4 +137,85 @@ describe("codex adapter", () => {
 
     await adapter.stop();
   });
+
+  test("filters shell snapshot warning lines and handles error frames", async () => {
+    const adapter = new CodexAdapter(
+      {
+        cmd: "codex",
+        workDir: "/Users/felixwang/Desktop/d-connect",
+      },
+      new Logger("error"),
+    );
+
+    const session = (await adapter.startSession()) as any;
+    expect(session.parseOutputLine("stderr", "2026-03-15T12:00:00Z WARN codex_core::shell_snapshot: ignored")).toEqual([]);
+
+    const failed = session.parseOutputLine(
+      "stderr",
+      JSON.stringify({
+        type: "turn.failed",
+        message: "internal codex error",
+      }),
+    );
+    expect(failed).toEqual([{ type: "error", content: "internal codex error", done: true }]);
+
+    const threadStarted = session.parseOutputLine(
+      "stdout",
+      JSON.stringify({
+        type: "thread.started",
+      }),
+    );
+    expect(threadStarted).toEqual([]);
+
+    await adapter.stop();
+  });
+
+  test("retries without resume when previous thread is missing", async () => {
+    const sessionFailureScript = `
+      const resumeIndex = process.argv.indexOf("resume");
+      const threadId = resumeIndex >= 0 ? process.argv[resumeIndex + 1] : "";
+      if (threadId === "codex-missing") {
+        console.error("thread not found");
+        process.exit(1);
+      }
+      console.log(${JSON.stringify(
+        JSON.stringify({
+          type: "thread.started",
+          thread_id: "codex-restored",
+        }),
+      )});
+      console.log(${JSON.stringify(
+        JSON.stringify({
+          type: "item.completed",
+          item: {
+            id: "item-restore",
+            type: "agent_message",
+            text: "restored from missing thread",
+          },
+        }),
+      )});
+    `;
+
+    const adapter = new CodexAdapter(
+      {
+        cmd: process.execPath,
+        args: ["-e", sessionFailureScript, "--"],
+      },
+      new Logger("error"),
+    );
+
+    const session = (await adapter.startSession("codex-missing")) as any;
+    const events: AgentEvent[] = [];
+    session.on("event", (event: AgentEvent) => {
+      events.push(event);
+    });
+
+    await session.send("hello");
+
+    expect(session.currentSessionId()).toBe("codex-restored");
+    expect(events.some((event) => event.type === "result")).toBe(true);
+    expect(events.some((event) => event.content === "restored from missing thread")).toBe(true);
+
+    await adapter.stop();
+  });
 });

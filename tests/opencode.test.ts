@@ -187,6 +187,45 @@ function buildOpencodeToolStreamScript(): string {
   return lines.map((line) => `console.log(${JSON.stringify(line)});`).join(" ");
 }
 
+function buildOpencodeFallbackScript(): string {
+  return JSON.stringify({
+    type: "text",
+    sessionID: "fallback-session",
+    part: {
+      id: "fallback-part",
+      sessionID: "fallback-session",
+      type: "text",
+      text: "ok from fallback",
+    },
+  });
+}
+
+function buildOpencodeRetryScript(): string {
+  return `
+    const args = process.argv.slice(2);
+    const sessionIndex = args.indexOf("--session");
+    const sessionId = sessionIndex >= 0 ? args[sessionIndex + 1] : "";
+    if (sessionId === "retry-session") {
+      console.error("session not found");
+      process.exit(1);
+    }
+    console.log(${JSON.stringify(buildOpencodeRetrySuccessPayload())});
+  `;
+}
+
+function buildOpencodeRetrySuccessPayload(): string {
+  return JSON.stringify({
+    type: "text",
+    sessionID: "new-session-id",
+    part: {
+      id: "resume-part",
+      sessionID: "new-session-id",
+      type: "text",
+      text: "session restored",
+    },
+  });
+}
+
 describe("opencode adapter", () => {
   test("builds opencode run invocation with resume and model", () => {
     const adapter = new OpenCodeAdapter(
@@ -287,6 +326,151 @@ describe("opencode adapter", () => {
       "ok",
     ]);
     expect(events.find((event) => event.type === "result")?.content).toBe("ok");
+
+    await adapter.stop();
+  });
+
+  test("retries once without session when session is invalid", async () => {
+    const adapter = new OpenCodeAdapter(
+      {
+        cmd: process.execPath,
+        args: ["-e", buildOpencodeRetryScript(), "--"],
+      },
+      new Logger("error"),
+    );
+
+    const session = await adapter.startSession("retry-session");
+    const events: AgentEvent[] = [];
+    session.on("event", (event: AgentEvent) => {
+      events.push(event);
+    });
+
+    await session.send("hello");
+
+    expect(session.currentSessionId()).toBe("new-session-id");
+    expect(events.map((event) => event.content)).toContain("session restored");
+    expect(events.some((event) => event.type === "result")).toBe(true);
+
+    await adapter.stop();
+  });
+
+  test("parseOutputLine handles top-level opencode errors", async () => {
+    const adapter = new OpenCodeAdapter(
+      {
+        cmd: process.execPath,
+        args: ["-e", "0", "--"],
+      },
+      new Logger("error"),
+    );
+
+    const session = await (adapter as any).startSession();
+    const output = (session as any).parseOutputLine("stdout", JSON.stringify({
+      type: "error",
+      error: "session not found",
+    }));
+
+    expect(output).toEqual([
+      {
+        type: "error",
+        sessionId: undefined,
+        content: "session not found",
+        done: true,
+      },
+    ]);
+  });
+
+  test("parseOutputLine falls back for invalid json line", async () => {
+    const adapter = new OpenCodeAdapter(
+      {
+        cmd: process.execPath,
+        args: ["-e", "0", "--"],
+      },
+      new Logger("error"),
+    );
+
+    const session = await (adapter as any).startSession();
+    const output = (session as any).parseOutputLine("stdout", "thinking deeply...");
+
+    expect(output).toEqual([{ type: "thinking", content: "thinking deeply..." }]);
+  });
+
+  test("parseOutputLine reports tool error when tool state is failed", async () => {
+    const adapter = new OpenCodeAdapter(
+      {
+        cmd: process.execPath,
+        args: ["-e", "0", "--"],
+      },
+      new Logger("error"),
+    );
+
+    const session = await (adapter as any).startSession();
+    const output = (session as any).parseOutputLine("stdout", JSON.stringify({
+      type: "assistant",
+      timestamp: 1773494848225,
+      sessionID: "ses_tool_err_1",
+      part: {
+        id: "tool_error_1",
+        sessionID: "ses_tool_err_1",
+        type: "tool",
+        tool: "bash",
+        state: {
+          status: "error",
+          error: "tool crashed",
+          input: {
+            command: "exit 1",
+          },
+        },
+      },
+    }));
+
+    expect(output).toEqual([
+      expect.objectContaining({
+        type: "tool_use",
+        sessionId: "ses_tool_err_1",
+        requestId: "tool_error_1",
+        toolName: "bash",
+      }),
+      {
+        type: "error",
+        sessionId: "ses_tool_err_1",
+        requestId: "tool_error_1",
+        content: "tool crashed",
+        done: true,
+      },
+    ]);
+  });
+
+  test("can parse fallback text through fallback script", async () => {
+    const adapter = new OpenCodeAdapter(
+      {
+        cmd: process.execPath,
+        args: ["-e", `console.log(${JSON.stringify(buildOpencodeFallbackScript())});`, "--"],
+      },
+      new Logger("error"),
+    );
+
+    const session = await adapter.startSession();
+    const events: AgentEvent[] = [];
+    session.on("event", (event: AgentEvent) => {
+      events.push(event);
+    });
+
+    await session.send("hello");
+
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "text",
+          content: "ok from fallback",
+          sessionId: "fallback-session",
+          requestId: "fallback-part",
+        }),
+        expect.objectContaining({
+          type: "result",
+          content: "ok from fallback",
+        }),
+      ]),
+    );
 
     await adapter.stop();
   });

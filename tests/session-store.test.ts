@@ -39,4 +39,13 @@ describe("session store", () => {
       },
     });
   });
+
+  test("returns sessions by id", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "d-connect-session-id-"));
+    const store = await createSessionStore(dataDir);
+
+    const session = store.getOrCreateActive("project:user");
+    expect(store.getById(session.id)).toBe(session);
+    expect(store.getById("missing")).toBeUndefined();
+  });
 });

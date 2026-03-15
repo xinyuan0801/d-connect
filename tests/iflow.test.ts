@@ -565,4 +565,348 @@ How can I assist you today?
 
     await adapter.stop();
   });
+
+  test("loadExecutionInfoFromOutputFile binds session when summary contains session id", async () => {
+    const root = await mkdtemp(join(tmpdir(), "d-connect-iflow-output-summary-"));
+    const outputPath = join(root, "summary.json");
+    const adapter = new IFlowAdapter(
+      {
+        cmd: "iflow",
+        workDir: "/Users/felixwang/Desktop/d-connect",
+      },
+      new Logger("error"),
+    );
+
+    await writeFile(
+      outputPath,
+      JSON.stringify({
+        "session-id": "session-summary",
+        "conversation-id": "conv-summary",
+        assistantRounds: 4,
+      }),
+      "utf8",
+    );
+
+    const session = (await adapter.startSession("session-old")) as any;
+    const turn = {
+      transcriptPath: undefined,
+      transcriptBindingSource: undefined,
+      outputFilePath: outputPath,
+      offset: 0,
+      partial: "",
+      outputProbe: "",
+      resultChunks: [],
+      lastTextAt: 0,
+      lastActivityAt: Date.now(),
+      lastToolActivityAt: 0,
+      hadToolActivity: false,
+      awaitingPostToolResponse: false,
+      pendingTools: new Map(),
+      seenToolUseIds: new Set(),
+      pendingStartedAt: 0,
+      startedAt: Date.now(),
+      lastToolResultToolName: undefined,
+      lastToolResultContent: undefined,
+      completedToolUseIds: new Set(),
+    } as any;
+
+    await session.loadExecutionInfoFromOutputFile(turn);
+
+    expect(session.currentSessionId()).toBe("session-summary");
+    expect(turn.transcriptBindingSource).toBe("session-id");
+    expect(turn.transcriptPath).toBe(adapter.resolveTranscriptPath("session-summary"));
+
+    await adapter.stop();
+  });
+
+  test("loadExecutionInfoFromOutputFile ignores malformed summary", async () => {
+    const outputPath = join(await mkdtemp(join(tmpdir(), "d-connect-iflow-output-invalid-")), "bad.json");
+    const adapter = new IFlowAdapter(
+      {
+        cmd: "iflow",
+        workDir: "/Users/felixwang/Desktop/d-connect",
+      },
+      new Logger("error"),
+    );
+
+    await writeFile(outputPath, "{}", "utf8");
+    const session = (await adapter.startSession("session-old")) as any;
+    const turn = {
+      transcriptPath: "/tmp/old-transcript.jsonl",
+      transcriptBindingSource: "mtime",
+      outputFilePath: outputPath,
+      offset: 0,
+      partial: "",
+      outputProbe: "",
+      resultChunks: [],
+      lastTextAt: 0,
+      lastActivityAt: Date.now(),
+      lastToolActivityAt: 0,
+      hadToolActivity: false,
+      awaitingPostToolResponse: false,
+      pendingTools: new Map(),
+      seenToolUseIds: new Set(),
+      completedToolUseIds: new Set(),
+      pendingStartedAt: 0,
+      startedAt: Date.now(),
+      lastToolResultToolName: undefined,
+      lastToolResultContent: undefined,
+    };
+
+    await session.loadExecutionInfoFromOutputFile(turn);
+
+    expect(session.currentSessionId()).toBe("session-old");
+    expect(turn.transcriptBindingSource).toBe("mtime");
+    expect(turn.transcriptPath).toBe("/tmp/old-transcript.jsonl");
+
+    await adapter.stop();
+  });
+
+  test("probeExecutionInfoFromOutput binds transcript by session-id extracted from execution info", async () => {
+    const adapter = new IFlowAdapter(
+      {
+        cmd: "iflow",
+        workDir: "/Users/felixwang/Desktop/d-connect",
+      },
+      new Logger("error"),
+    );
+
+    const session = (await adapter.startSession("session-old")) as any;
+    const turn = {
+      transcriptPath: undefined,
+      transcriptBindingSource: undefined,
+      outputFilePath: undefined,
+      offset: 0,
+      partial: "",
+      outputProbe: "",
+      resultChunks: [],
+      lastTextAt: 0,
+      lastActivityAt: Date.now(),
+      lastToolActivityAt: 0,
+      hadToolActivity: false,
+      awaitingPostToolResponse: false,
+      pendingTools: new Map(),
+      seenToolUseIds: new Set(),
+      completedToolUseIds: new Set(),
+      pendingStartedAt: 0,
+      startedAt: Date.now(),
+      lastToolResultToolName: undefined,
+      lastToolResultContent: undefined,
+    };
+
+    session.probeExecutionInfoFromOutput(
+      turn,
+      `working...
+<Execution Info>
+{"session-id":"session-probed","conversation-id":"conv-probed"}
+</Execution Info>`,
+    );
+
+    expect(session.currentSessionId()).toBe("session-probed");
+    expect(turn.transcriptBindingSource).toBe("session-id");
+    expect(turn.transcriptPath).toBe(adapter.resolveTranscriptPath("session-probed"));
+  });
+
+  test("bindTranscriptBySessionId keeps existing mtime transcript when it already has consumed content", async () => {
+    const adapter = new IFlowAdapter(
+      {
+        cmd: "iflow",
+        workDir: "/Users/felixwang/Desktop/d-connect",
+      },
+      new Logger("error"),
+    );
+
+    const session = (await adapter.startSession("session-old")) as any;
+    const turn = {
+      transcriptPath: "/tmp/current-transcript.jsonl",
+      transcriptBindingSource: "mtime",
+      outputFilePath: undefined,
+      offset: 10,
+      partial: "",
+      outputProbe: "",
+      resultChunks: ["already has text"],
+      lastTextAt: 0,
+      lastActivityAt: Date.now(),
+      lastToolActivityAt: 0,
+      hadToolActivity: false,
+      awaitingPostToolResponse: false,
+      pendingTools: new Map(),
+      seenToolUseIds: new Set(),
+      completedToolUseIds: new Set(),
+      pendingStartedAt: 0,
+      startedAt: Date.now(),
+      lastToolResultToolName: undefined,
+      lastToolResultContent: undefined,
+    };
+
+    session.bindTranscriptBySessionId(turn, "session-new", "session-state");
+
+    expect(session.currentSessionId()).toBe("session-new");
+    expect(turn.transcriptPath).toBe("/tmp/current-transcript.jsonl");
+    expect(turn.transcriptBindingSource).toBe("mtime");
+    expect(turn.offset).toBe(10);
+  });
+
+  test("bindTranscriptBySessionId adopts candidate transcript path when safe to switch", async () => {
+    const adapter = new IFlowAdapter(
+      {
+        cmd: "iflow",
+        workDir: "/Users/felixwang/Desktop/d-connect",
+      },
+      new Logger("error"),
+    );
+
+    const session = (await adapter.startSession("session-safe")) as any;
+    const turn = {
+      transcriptPath: "/tmp/old-transcript.jsonl",
+      transcriptBindingSource: "mtime",
+      outputFilePath: undefined,
+      offset: 10,
+      partial: "partial-seed",
+      outputProbe: "",
+      resultChunks: [],
+      lastTextAt: 0,
+      lastActivityAt: Date.now(),
+      lastToolActivityAt: 0,
+      hadToolActivity: false,
+      awaitingPostToolResponse: false,
+      pendingTools: new Map(),
+      seenToolUseIds: new Set(),
+      completedToolUseIds: new Set(),
+      pendingStartedAt: 0,
+      startedAt: Date.now(),
+      lastToolResultToolName: undefined,
+      lastToolResultContent: undefined,
+    };
+
+    session.bindTranscriptBySessionId(turn, "session-safe-switch", "session-state");
+
+    expect(turn.transcriptPath).toBe(adapter.resolveTranscriptPath("session-safe-switch"));
+    expect(turn.transcriptBindingSource).toBe("session-id");
+    expect(turn.offset).toBe(0);
+    expect(turn.partial).toBe("");
+    expect(session.currentSessionId()).toBe("session-safe-switch");
+  });
+
+  test("loadNewTranscript handles truncated read offsets by resetting to zero", async () => {
+    const root = await mkdtemp(join(tmpdir(), "d-connect-iflow-truncated-"));
+    const transcriptPath = join(root, "session-truncated.jsonl");
+    const line = JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "已完成" }] } }) + "\n";
+    await writeFile(transcriptPath, line, "utf8");
+
+    const adapter = new IFlowAdapter(
+      {
+        cmd: "iflow",
+        workDir: "/Users/felixwang/Desktop/d-connect",
+      },
+      new Logger("error"),
+    );
+    const session = (await adapter.startSession("session-truncated")) as any;
+    const turn = {
+      transcriptPath,
+      transcriptBindingSource: "mtime",
+      outputFilePath: undefined,
+      offset: line.length + 8,
+      partial: "seed-partial",
+      outputProbe: "",
+      resultChunks: [],
+      lastTextAt: 0,
+      lastActivityAt: Date.now(),
+      lastToolActivityAt: 0,
+      hadToolActivity: false,
+      awaitingPostToolResponse: false,
+      pendingTools: new Map(),
+      seenToolUseIds: new Set(),
+      completedToolUseIds: new Set(),
+      pendingStartedAt: 0,
+      startedAt: Date.now(),
+      lastToolResultToolName: undefined,
+      lastToolResultContent: undefined,
+    };
+
+    await session.loadNewTranscript(turn);
+    expect(turn.offset).toBe(0);
+    expect(turn.partial).toBe("");
+  });
+
+  test("loadNewTranscript keeps unterminated line in partial without emitting an event", async () => {
+    const root = await mkdtemp(join(tmpdir(), "d-connect-iflow-partial-"));
+    const tempPath = join(root, "session-partial.jsonl");
+    const adapter = new IFlowAdapter(
+      {
+        cmd: "iflow",
+        workDir: "/Users/felixwang/Desktop/d-connect",
+      },
+      new Logger("error"),
+    );
+    const transcriptPath = adapter.resolveTranscriptPath("session-partial", tempPath) ?? tempPath;
+
+    await mkdir(dirname(transcriptPath), { recursive: true });
+    const line = JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "pending" }] } });
+    await writeFile(transcriptPath, line, "utf8");
+
+    const session = (await adapter.startSession("session-partial")) as any;
+    const turn = {
+      transcriptPath,
+      transcriptBindingSource: undefined,
+      outputFilePath: undefined,
+      offset: 0,
+      partial: "",
+      outputProbe: "",
+      resultChunks: [],
+      lastTextAt: 0,
+      lastActivityAt: Date.now(),
+      lastToolActivityAt: 0,
+      hadToolActivity: false,
+      awaitingPostToolResponse: false,
+      pendingTools: new Map(),
+      seenToolUseIds: new Set(),
+      completedToolUseIds: new Set(),
+      pendingStartedAt: 0,
+      startedAt: Date.now(),
+      lastToolResultToolName: undefined,
+      lastToolResultContent: undefined,
+    };
+
+    await session.loadNewTranscript(turn);
+
+    expect(turn.resultChunks).toEqual([]);
+    expect(turn.partial).toBe(line);
+  });
+
+  test("buildPostToolFallback emits background-task message when run_shell_command output includes task id", async () => {
+    const adapter = new IFlowAdapter(
+      {
+        cmd: "iflow",
+        workDir: "/Users/felixwang/Desktop/d-connect",
+      },
+      new Logger("error"),
+    );
+    const session = (await adapter.startSession("session-fallback")) as any;
+
+    const message = session.buildPostToolFallback({
+      lastToolResultToolName: "run_shell_command",
+      lastToolResultContent: "Command running in background with ID: abc123",
+    });
+
+    expect(message).toContain("任务 ID: abc123");
+  });
+
+  test("buildPostToolFallback emits generic fallback message for normal tool result", async () => {
+    const adapter = new IFlowAdapter(
+      {
+        cmd: "iflow",
+        workDir: "/Users/felixwang/Desktop/d-connect",
+      },
+      new Logger("error"),
+    );
+    const session = (await adapter.startSession("session-fallback")) as any;
+
+    const message = session.buildPostToolFallback({
+      lastToolResultToolName: "other_tool",
+      lastToolResultContent: "done",
+    });
+
+    expect(message).toBe("iflow 在工具执行后结束了当前轮次，但没有产出最终回复；已保留底层续聊状态。");
+  });
 });

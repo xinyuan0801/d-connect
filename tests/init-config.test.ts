@@ -1,11 +1,24 @@
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import { buildConfigFromAnswers, defaultInitAnswers, inferProjectNameFromWorkDir, initConfig } from "../src/config/init.js";
 import { loadConfig, normalizeConfig } from "../src/config/index.js";
 
+const initMocks = vi.hoisted(() => ({
+  runInitTui: vi.fn(),
+}));
+
+vi.mock("../src/config/init-tui.js", () => ({
+  runConfigWizard: initMocks.runInitTui,
+  runInitTui: initMocks.runInitTui,
+}));
+
 describe("init config", () => {
+  beforeEach(() => {
+    initMocks.runInitTui.mockReset();
+  });
+
   test("buildConfigFromAnswers builds dingtalk project config", () => {
     const answers = {
       ...defaultInitAnswers(),
@@ -119,6 +132,40 @@ describe("init config", () => {
     expect(inferProjectNameFromWorkDir("/tmp/my repo")).toBe("my-repo");
     expect(inferProjectNameFromWorkDir("")).toBe("my-backend");
     expect(inferProjectNameFromWorkDir("/", "fallback")).toBe("fallback");
+    expect(inferProjectNameFromWorkDir(".", "fallback")).toBe(".");
+    expect(inferProjectNameFromWorkDir("\\", "fallback")).toBe("fallback");
+  });
+
+  test("buildConfigFromAnswers rejects blank required fields", () => {
+    expect(() =>
+      buildConfigFromAnswers({
+        ...defaultInitAnswers(),
+        projectName: "",
+        agentCmd: "claude",
+        agentWorkDir: "/tmp/repo",
+        allowFrom: "u1",
+      }),
+    ).toThrow('"projectName" cannot be empty');
+
+    expect(() =>
+      buildConfigFromAnswers({
+        ...defaultInitAnswers(),
+        projectName: "demo",
+        agentCmd: "",
+        agentWorkDir: "/tmp/repo",
+        allowFrom: "u1",
+      }),
+    ).toThrow('"agentCmd" cannot be empty');
+
+    expect(() =>
+      buildConfigFromAnswers({
+        ...defaultInitAnswers(),
+        projectName: "demo",
+        agentCmd: "claude",
+        agentWorkDir: "",
+        allowFrom: "u1",
+      }),
+    ).toThrow('"agentWorkDir" cannot be empty');
   });
 
   test("initConfig writes default config with --yes", async () => {
@@ -176,5 +223,40 @@ describe("init config", () => {
 
     const file = await readFile(configPath, "utf8");
     expect(file).toContain("\"configVersion\": 1");
+  });
+
+  test("initConfig calls wizard when --yes is not set", async () => {
+    const root = await mkdtemp(join(tmpdir(), "d-connect-init-wizard-"));
+    const cwd = join(root, "workspace");
+    const configPath = join(root, "config.json");
+    const answers = {
+      ...defaultInitAnswers({ cwd }),
+      projectName: "wizard-demo",
+      platformType: "discord" as const,
+      discordBotToken: "discord-token",
+      discordRequireMention: false,
+    };
+    initMocks.runInitTui.mockResolvedValue(answers);
+
+    const result = await initConfig({
+      explicitConfigPath: configPath,
+      yes: false,
+      cwd,
+      stdin: process.stdin,
+      stdout: process.stdout,
+    });
+
+    expect(initMocks.runInitTui).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaults: expect.objectContaining({
+          projectName: "workspace",
+          platformType: "dingtalk",
+        }),
+        configPath,
+        overwritten: false,
+      }),
+    );
+    expect(result.configPath).toBe(configPath);
+    expect(result.overwritten).toBe(false);
   });
 });
