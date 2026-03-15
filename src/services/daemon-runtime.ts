@@ -11,7 +11,7 @@ import type { ResolvedAppConfig } from "../config/normalize.js";
 import type { SessionRecord } from "./session-repository.js";
 import { Logger } from "../infra/logging/logger.js";
 import { MessageRelay } from "./message-relay.js";
-import { ProjectRegistry, type ProjectRuntime } from "./project-registry.js";
+import { ProjectRegistry, type ProjectRegistryOptions, type ProjectRuntime } from "./project-registry.js";
 import { ConversationService } from "./conversation-service.js";
 import { CommandService } from "./command-service.js";
 import { GuardService, buildGuardBlockedMessage } from "./guard-service.js";
@@ -32,6 +32,11 @@ export interface RuntimeSendResult extends TurnResult {
   project: string;
   sessionKey: string;
   sessionId: string;
+}
+
+export interface DaemonRuntimeOptions {
+  configPath?: string;
+  projectRegistry?: ProjectRegistryOptions;
 }
 
 interface DispatchOptions {
@@ -70,12 +75,12 @@ export class DaemonRuntime implements JobExecutor {
     private readonly logger: Logger,
     sessions: SessionRepository,
     private readonly loopScheduler?: LoopScheduler,
-    private readonly configPath?: string,
+    options: DaemonRuntimeOptions = {},
   ) {
     this.sessions = sessions;
-    this.registry = new ProjectRegistry(config, logger.child("runtime"));
+    this.registry = new ProjectRegistry(config, logger.child("runtime"), options.projectRegistry);
     this.conversations = new ConversationService(sessions, logger.child("conversation"));
-    this.commandService = new CommandService(this.conversations, loopScheduler, configPath);
+    this.commandService = new CommandService(this.conversations, loopScheduler, options.configPath);
     this.guardService = new GuardService(logger.child("guard"));
   }
 
@@ -83,10 +88,10 @@ export class DaemonRuntime implements JobExecutor {
     config: ResolvedAppConfig,
     logger: Logger,
     loopScheduler?: LoopScheduler,
-    configPath?: string,
+    options: DaemonRuntimeOptions = {},
   ): Promise<DaemonRuntime> {
     const sessions = await createSessionStore(config.dataDir);
-    return new DaemonRuntime(config, logger, sessions, loopScheduler, configPath);
+    return new DaemonRuntime(config, logger, sessions, loopScheduler, options);
   }
 
   async start(): Promise<void> {

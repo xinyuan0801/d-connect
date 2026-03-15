@@ -163,6 +163,22 @@ pnpm test
 pnpm run build
 ```
 
+真实 Agent 端到端 smoke test：
+
+```bash
+D_CONNECT_REAL_AGENT_E2E=1 pnpm test tests/runtime-real-agent.test.ts
+D_CONNECT_REAL_AGENT_E2E=1 D_CONNECT_REAL_AGENT_TYPES=codex,claudecode pnpm test tests/runtime-real-agent.test.ts
+D_CONNECT_REAL_AGENT_E2E=1 pnpm test tests/daemon-real-ipc.test.ts
+D_CONNECT_REAL_AGENT_E2E=1 pnpm test tests/daemon-real-tooling.test.ts
+```
+
+- `tests/runtime-real-agent.test.ts` 仍然使用内存里的 fake platform，因此 platform 侧保持解耦；但 agent 侧会走真实 CLI。
+- `tests/daemon-real-ipc.test.ts` 会启动真实 `RuntimeEngine + LoopScheduler + IpcServer`，通过真实 IPC `/send`、`/loop/add`、`/loop/list`、`/loop/del` 跑完整 daemon 链路。
+- `tests/daemon-real-tooling.test.ts` 会通过真实 daemon IPC 验证 agent 的工具调用事件渲染和多轮复杂输出。
+- 可通过 `D_CONNECT_REAL_AGENT_TYPES` 指定要跑的 agent 子集，支持：`claudecode`、`codex`、`opencode`、`qoder`、`iflow`。
+- `tests/daemon-real-ipc.test.ts` 也支持 `D_CONNECT_REAL_IPC_AGENT_TYPES`；`tests/daemon-real-tooling.test.ts` 也支持 `D_CONNECT_REAL_TOOL_AGENT_TYPES`。
+- 若本机命令名不是默认值，可分别用 `D_CONNECT_E2E_CLAUDE_CMD`、`D_CONNECT_E2E_CODEX_CMD`、`D_CONNECT_E2E_OPENCODE_CMD`、`D_CONNECT_E2E_QODER_CMD`、`D_CONNECT_E2E_IFLOW_CMD` 覆盖。
+
 涉及以下改动时，测试不要省：
 
 - `src/runtime/**`

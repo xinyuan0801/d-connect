@@ -12,16 +12,30 @@ export interface ProjectRuntime {
   sessions: Map<string, AgentSession>;
 }
 
+export interface ProjectRegistryOptions {
+  createAgentAdapter?: (project: ResolvedProjectConfig, logger: Logger) => AgentAdapter;
+  createPlatformAdapters?: (project: ResolvedProjectConfig, logger: Logger) => PlatformAdapter[];
+}
+
 export class ProjectRegistry {
   private readonly projects = new Map<string, ProjectRuntime>();
+  private readonly createAgentAdapterImpl: (project: ResolvedProjectConfig, logger: Logger) => AgentAdapter;
+  private readonly createPlatformAdaptersImpl: (project: ResolvedProjectConfig, logger: Logger) => PlatformAdapter[];
 
-  constructor(private readonly config: ResolvedAppConfig, private readonly logger: Logger) {}
+  constructor(
+    private readonly config: ResolvedAppConfig,
+    private readonly logger: Logger,
+    options: ProjectRegistryOptions = {},
+  ) {
+    this.createAgentAdapterImpl = options.createAgentAdapter ?? createAgentAdapter;
+    this.createPlatformAdaptersImpl = options.createPlatformAdapters ?? createPlatformAdapters;
+  }
 
   async start(onMessage: (project: string, platform: PlatformAdapter, message: InboundMessage) => Promise<void>): Promise<void> {
     for (const project of this.config.projects) {
       const projectLogger = this.logger.child(`project:${project.name}`);
-      const agent = createAgentAdapter(project, projectLogger.child("agent"));
-      const platforms = createPlatformAdapters(project, projectLogger);
+      const agent = this.createAgentAdapterImpl(project, projectLogger.child("agent"));
+      const platforms = this.createPlatformAdaptersImpl(project, projectLogger);
       const runtime: ProjectRuntime = {
         config: project,
         agent,
@@ -38,7 +52,7 @@ export class ProjectRegistry {
 
       projectLogger.info("project started", {
         agent: project.agent.type,
-        platforms: project.platforms.map((platform) => platform.type).join(","),
+        platforms: platforms.map((platform) => platform.name).join(","),
       });
     }
   }

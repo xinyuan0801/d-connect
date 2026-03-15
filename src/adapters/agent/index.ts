@@ -9,15 +9,41 @@ import { createIFlowAdapter } from "./iflow.js";
 import type { BaseAgentOptions } from "./options.js";
 
 function toBaseOptions(value: Record<string, unknown>): BaseAgentOptions {
-  const options: BaseAgentOptions = {};
-  if (typeof value.cmd === "string") options.cmd = value.cmd;
+  const options: BaseAgentOptions = {
+    ...value,
+  };
+
+  if (typeof value.cmd === "string") {
+    options.cmd = value.cmd;
+  } else {
+    delete options.cmd;
+  }
+
   if (Array.isArray(value.args) && value.args.every((v) => typeof v === "string")) {
     options.args = value.args as string[];
+  } else {
+    delete options.args;
   }
-  if (typeof value.workDir === "string") options.workDir = value.workDir;
-  if (typeof value.model === "string") options.model = value.model;
-  if (typeof value.promptArg === "string") options.promptArg = value.promptArg;
-  if (typeof value.stdinPrompt === "boolean") options.stdinPrompt = value.stdinPrompt;
+  if (typeof value.workDir === "string") {
+    options.workDir = value.workDir;
+  } else {
+    delete options.workDir;
+  }
+  if (typeof value.model === "string") {
+    options.model = value.model;
+  } else {
+    delete options.model;
+  }
+  if (typeof value.promptArg === "string") {
+    options.promptArg = value.promptArg;
+  } else {
+    delete options.promptArg;
+  }
+  if (typeof value.stdinPrompt === "boolean") {
+    options.stdinPrompt = value.stdinPrompt;
+  } else {
+    delete options.stdinPrompt;
+  }
 
   if (value.env && typeof value.env === "object" && !Array.isArray(value.env)) {
     const env: Record<string, string> = {};
@@ -28,7 +54,11 @@ function toBaseOptions(value: Record<string, unknown>): BaseAgentOptions {
     }
     if (Object.keys(env).length > 0) {
       options.env = env;
+    } else {
+      delete options.env;
     }
+  } else {
+    delete options.env;
   }
 
   return options;

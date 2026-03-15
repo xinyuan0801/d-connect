@@ -2,48 +2,58 @@ import { EventEmitter } from "node:events";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { describe, expect, test } from "vitest";
+import type { ResolvedAppConfig, ResolvedGuardConfig } from "../src/config/normalize.js";
+import { Logger } from "../src/logging.js";
+import { createLoopStore, LoopScheduler } from "../src/scheduler/loop.js";
 import type {
   AgentAdapter,
   AgentEvent,
   AgentSession,
   DeliveryTarget,
   InboundMessage,
+  PermissionResult,
   PlatformAdapter,
   PlatformResponseResult,
 } from "../src/runtime/types.js";
-import { Logger } from "../src/logging.js";
-import { createLoopStore, LoopScheduler } from "../src/scheduler/loop.js";
+import { RuntimeEngine } from "../src/runtime/engine.js";
+import type { ProjectRegistryOptions } from "../src/services/project-registry.js";
 
-const mockState = vi.hoisted(() => ({
-  platformInstances: [] as any[],
-  agentInstances: [] as any[],
-}));
-
+const TEST_PLATFORM_NAME = "test-platform";
 const CHAT_ID = "chat-1";
-const CHAT_SESSION_KEY = "dingtalk:chat-1:user-1";
+const CHAT_SESSION_KEY = `${TEST_PLATFORM_NAME}:${CHAT_ID}:user-1`;
 const CHAT_TARGET: DeliveryTarget = {
-  platform: "dingtalk",
+  platform: TEST_PLATFORM_NAME,
   payload: {
     chatId: CHAT_ID,
   },
 };
 
-function createDingTalkPlatformConfig() {
+function createResolvedConfig(dataDir: string, guard: ResolvedGuardConfig = { enabled: false }): ResolvedAppConfig {
   return {
-    type: "dingtalk" as const,
-    options: {
-      clientId: "ding-id",
-      clientSecret: "ding-secret",
-      allowFrom: "*",
-      processingNotice: "处理中...",
-    },
+    configVersion: 1,
+    dataDir,
+    log: { level: "error" as const },
+    loop: { silent: false },
+    projects: [
+      {
+        name: "demo",
+        agent: {
+          type: "claudecode" as const,
+          options: {
+            cmd: "fake",
+          },
+        },
+        guard,
+        platforms: [],
+      },
+    ],
   };
 }
 
 function createInboundPlatformMessage(content: string, messageId: string): InboundMessage {
   return {
-    platform: "dingtalk",
+    platform: TEST_PLATFORM_NAME,
     sessionKey: CHAT_SESSION_KEY,
     userId: "user-1",
     userName: "User 1",
@@ -73,8 +83,8 @@ class FakeSession extends EventEmitter implements AgentSession {
     if (prompt.includes("你是 d-connect 的入站消息安全 guard。")) {
       this.agent.guardPrompts.push(prompt);
       const shouldBlock =
-        prompt.includes('"deploy now"') ||
-        (prompt.includes("禁止任何 deploy 请求。") && prompt.includes('"please deploy"'));
+        prompt.includes("\"deploy now\"") ||
+        (prompt.includes("禁止任何 deploy 请求。") && prompt.includes("\"please deploy\""));
       this.emit("event", {
         type: "result",
         content: JSON.stringify(
@@ -102,7 +112,7 @@ class FakeSession extends EventEmitter implements AgentSession {
     } satisfies AgentEvent);
   }
 
-  async respondPermission(): Promise<void> {
+  async respondPermission(_requestId: string, _result: PermissionResult): Promise<void> {
     // noop
   }
 
@@ -125,7 +135,7 @@ class FakeAgent implements AgentAdapter {
   public guardPrompts: string[] = [];
   public conversationPrompts: string[] = [];
 
-  async startSession(): Promise<AgentSession> {
+  async startSession(_sessionId?: string): Promise<AgentSession> {
     const session = new FakeSession(this);
     this.sessions.push(session);
     return session;
@@ -137,7 +147,7 @@ class FakeAgent implements AgentAdapter {
 }
 
 class FakePlatform implements PlatformAdapter {
-  readonly name = "dingtalk";
+  readonly name = TEST_PLATFORM_NAME;
   public handler?: (message: InboundMessage) => Promise<void> | void;
   public replies: Array<{ replyContext: unknown; content: string }> = [];
   public sends: Array<{ target: DeliveryTarget; content: string }> = [];
@@ -176,57 +186,56 @@ class FakePlatform implements PlatformAdapter {
   }
 }
 
-vi.mock("../src/adapters/agent/index.js", () => ({
-  createAgentAdapter: () => {
-    const agent = new FakeAgent();
-    mockState.agentInstances.push(agent);
-    return agent;
-  },
-}));
+interface RuntimeFixtureState {
+  platforms: FakePlatform[];
+  agents: FakeAgent[];
+}
 
-vi.mock("../src/adapters/platform/index.js", () => ({
-  createPlatformAdapters: () => {
-    const platform = new FakePlatform();
-    mockState.platformInstances.push(platform);
-    return [platform];
-  },
-}));
+function createRuntimeFixtureState(): RuntimeFixtureState {
+  return {
+    platforms: [],
+    agents: [],
+  };
+}
 
-import { RuntimeEngine } from "../src/runtime/engine.js";
+function createProjectRegistryOptions(state: RuntimeFixtureState): ProjectRegistryOptions {
+  return {
+    createAgentAdapter: () => {
+      const agent = new FakeAgent();
+      state.agents.push(agent);
+      return agent;
+    },
+    createPlatformAdapters: () => {
+      const platform = new FakePlatform();
+      state.platforms.push(platform);
+      return [platform];
+    },
+  };
+}
+
+function createRuntimeEngine(
+  config: ResolvedAppConfig,
+  state: RuntimeFixtureState,
+  loopScheduler?: LoopScheduler,
+  configPath?: string,
+): RuntimeEngine {
+  return new RuntimeEngine(config, new Logger("error"), loopScheduler, {
+    configPath,
+    projectRegistry: createProjectRegistryOptions(state),
+  });
+}
 
 describe("runtime integration", () => {
-  beforeEach(() => {
-    mockState.platformInstances.length = 0;
-    mockState.agentInstances.length = 0;
-  });
-
   test("persists delivery target from inbound platform messages and reuses it after restart", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "d-connect-runtime-"));
-    const config = {
-      configVersion: 1,
-      dataDir,
-      log: { level: "error" as const },
-      loop: { silent: false },
-      projects: [
-        {
-          name: "demo",
-          agent: {
-            type: "claudecode" as const,
-            options: {
-              cmd: "fake",
-            },
-          },
-          platforms: [createDingTalkPlatformConfig()],
-        },
-      ],
-    };
-
+    const config = createResolvedConfig(dataDir);
+    const state = createRuntimeFixtureState();
     const loopStore = await createLoopStore(dataDir);
     const loopScheduler = new LoopScheduler(loopStore, new Logger("error"));
-    const runtime = new RuntimeEngine(config, new Logger("error"), loopScheduler);
+    const runtime = createRuntimeEngine(config, state, loopScheduler);
     await runtime.start();
 
-    const platform1 = mockState.platformInstances[0];
+    const platform1 = state.platforms[0];
     expect(platform1).toBeTruthy();
 
     await platform1?.deliver(createInboundPlatformMessage("ping", "om_1"));
@@ -234,10 +243,10 @@ describe("runtime integration", () => {
     expect(platform1?.replies.map((item) => item.content)).toContain("echo:ping");
     await runtime.stop();
 
-    const restarted = new RuntimeEngine(config, new Logger("error"));
+    const restarted = createRuntimeEngine(config, state);
     await restarted.start();
 
-    const platform2 = mockState.platformInstances[1];
+    const platform2 = state.platforms[1];
     expect(platform2).toBeTruthy();
 
     await restarted.executeJob({
@@ -268,32 +277,15 @@ describe("runtime integration", () => {
 
   test("runs loop jobs in isolated agent sessions by default while reusing the original delivery target", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "d-connect-runtime-"));
-    const config = {
-      configVersion: 1,
-      dataDir,
-      log: { level: "error" as const },
-      loop: { silent: false },
-      projects: [
-        {
-          name: "demo",
-          agent: {
-            type: "claudecode" as const,
-            options: {
-              cmd: "fake",
-            },
-          },
-          platforms: [createDingTalkPlatformConfig()],
-        },
-      ],
-    };
-
+    const config = createResolvedConfig(dataDir);
+    const state = createRuntimeFixtureState();
     const loopStore = await createLoopStore(dataDir);
     const loopScheduler = new LoopScheduler(loopStore, new Logger("error"));
-    const runtime = new RuntimeEngine(config, new Logger("error"), loopScheduler);
+    const runtime = createRuntimeEngine(config, state, loopScheduler);
     await runtime.start();
 
-    const platform = mockState.platformInstances[0] as FakePlatform | undefined;
-    const agent = mockState.agentInstances[0] as FakeAgent | undefined;
+    const platform = state.platforms[0];
+    const agent = state.agents[0];
 
     await platform?.deliver(createInboundPlatformMessage("ping", "om_1"));
 
@@ -332,28 +324,11 @@ describe("runtime integration", () => {
   test("routes natural language /loop requests into agent prompts", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "d-connect-runtime-"));
     const configPath = "/tmp/d-connect/runtime-config.json";
-    const config = {
-      configVersion: 1,
-      dataDir,
-      log: { level: "error" as const },
-      loop: { silent: false },
-      projects: [
-        {
-          name: "demo",
-          agent: {
-            type: "claudecode" as const,
-            options: {
-              cmd: "fake",
-            },
-          },
-          platforms: [createDingTalkPlatformConfig()],
-        },
-      ],
-    };
-
+    const config = createResolvedConfig(dataDir);
+    const state = createRuntimeFixtureState();
     const loopStore = await createLoopStore(dataDir);
     const loopScheduler = new LoopScheduler(loopStore, new Logger("error"));
-    const runtime = new RuntimeEngine(config, new Logger("error"), loopScheduler, { configPath });
+    const runtime = createRuntimeEngine(config, state, loopScheduler, configPath);
     await runtime.start();
 
     const result = await runtime.send({
@@ -362,7 +337,7 @@ describe("runtime integration", () => {
       content: "/loop 每天早上 9 点提醒我检查构建状态，规则用 0 0 9 * * *",
     });
 
-    const agent = mockState.agentInstances[0] as FakeAgent | undefined;
+    const agent = state.agents[0];
     const session = agent?.sessions[0];
     expect(session?.prompts).toHaveLength(1);
     expect(session?.prompts[0]).toContain("d-connect 支持通过命令行管理 loop 任务。");
@@ -380,29 +355,12 @@ describe("runtime integration", () => {
 
   test("wraps inbound replies with platform response lifecycle hooks", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "d-connect-runtime-"));
-    const config = {
-      configVersion: 1,
-      dataDir,
-      log: { level: "error" as const },
-      loop: { silent: false },
-      projects: [
-        {
-          name: "demo",
-          agent: {
-            type: "claudecode" as const,
-            options: {
-              cmd: "fake",
-            },
-          },
-          platforms: [createDingTalkPlatformConfig()],
-        },
-      ],
-    };
-
-    const runtime = new RuntimeEngine(config, new Logger("error"));
+    const config = createResolvedConfig(dataDir);
+    const state = createRuntimeFixtureState();
+    const runtime = createRuntimeEngine(config, state);
     await runtime.start();
 
-    const platform = mockState.platformInstances[0] as FakePlatform | undefined;
+    const platform = state.platforms[0];
     await platform?.deliver(createInboundPlatformMessage("ping", "om_1"));
 
     expect(platform?.lifecycleEvents).toEqual([
@@ -417,34 +375,16 @@ describe("runtime integration", () => {
 
   test("blocks inbound platform messages when guard denies them", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "d-connect-runtime-"));
-    const config = {
-      configVersion: 1,
-      dataDir,
-      log: { level: "error" as const },
-      loop: { silent: false },
-      projects: [
-        {
-          name: "demo",
-          agent: {
-            type: "claudecode" as const,
-            options: {
-              cmd: "fake",
-            },
-          },
-          guard: {
-            enabled: true,
-            rules: "禁止任何 deploy 请求。",
-          },
-          platforms: [createDingTalkPlatformConfig()],
-        },
-      ],
-    };
-
-    const runtime = new RuntimeEngine(config, new Logger("error"));
+    const config = createResolvedConfig(dataDir, {
+      enabled: true,
+      rules: "禁止任何 deploy 请求。",
+    });
+    const state = createRuntimeFixtureState();
+    const runtime = createRuntimeEngine(config, state);
     await runtime.start();
 
-    const platform = mockState.platformInstances[0] as FakePlatform | undefined;
-    const agent = mockState.agentInstances[0] as FakeAgent | undefined;
+    const platform = state.platforms[0];
+    const agent = state.agents[0];
 
     await platform?.deliver(createInboundPlatformMessage("please deploy", "om_block"));
 
@@ -466,33 +406,15 @@ describe("runtime integration", () => {
 
   test("allows inbound platform messages after guard passes", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "d-connect-runtime-"));
-    const config = {
-      configVersion: 1,
-      dataDir,
-      log: { level: "error" as const },
-      loop: { silent: false },
-      projects: [
-        {
-          name: "demo",
-          agent: {
-            type: "claudecode" as const,
-            options: {
-              cmd: "fake",
-            },
-          },
-          guard: {
-            enabled: true,
-          },
-          platforms: [createDingTalkPlatformConfig()],
-        },
-      ],
-    };
-
-    const runtime = new RuntimeEngine(config, new Logger("error"));
+    const config = createResolvedConfig(dataDir, {
+      enabled: true,
+    });
+    const state = createRuntimeFixtureState();
+    const runtime = createRuntimeEngine(config, state);
     await runtime.start();
 
-    const platform = mockState.platformInstances[0] as FakePlatform | undefined;
-    const agent = mockState.agentInstances[0] as FakeAgent | undefined;
+    const platform = state.platforms[0];
+    const agent = state.agents[0];
 
     await platform?.deliver(createInboundPlatformMessage("hello", "om_allow"));
 
@@ -505,34 +427,16 @@ describe("runtime integration", () => {
 
   test("skips guard for slash commands from platform messages", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "d-connect-runtime-"));
-    const config = {
-      configVersion: 1,
-      dataDir,
-      log: { level: "error" as const },
-      loop: { silent: false },
-      projects: [
-        {
-          name: "demo",
-          agent: {
-            type: "claudecode" as const,
-            options: {
-              cmd: "fake",
-            },
-          },
-          guard: {
-            enabled: true,
-            rules: "禁止任何请求。",
-          },
-          platforms: [createDingTalkPlatformConfig()],
-        },
-      ],
-    };
-
-    const runtime = new RuntimeEngine(config, new Logger("error"));
+    const config = createResolvedConfig(dataDir, {
+      enabled: true,
+      rules: "禁止任何请求。",
+    });
+    const state = createRuntimeFixtureState();
+    const runtime = createRuntimeEngine(config, state);
     await runtime.start();
 
-    const platform = mockState.platformInstances[0] as FakePlatform | undefined;
-    const agent = mockState.agentInstances[0] as FakeAgent | undefined;
+    const platform = state.platforms[0];
+    const agent = state.agents[0];
 
     await platform?.deliver(createInboundPlatformMessage("/new review", "om_cmd"));
 

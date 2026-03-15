@@ -4,16 +4,14 @@ import type { ResolvedAppConfig } from "../config/normalize.js";
 import { normalizeConfig } from "../config/normalize.js";
 import { Logger } from "../infra/logging/logger.js";
 import { LoopScheduler } from "../scheduler/loop.js";
-import { DaemonRuntime, type RuntimeSendInput, type RuntimeSendResult } from "../services/daemon-runtime.js";
+import { DaemonRuntime, type DaemonRuntimeOptions, type RuntimeSendInput, type RuntimeSendResult } from "../services/daemon-runtime.js";
 export { formatResponseFromEvents, splitResponseMessages, summarizeToolMessages } from "../services/message-relay.js";
 
 function isResolvedConfig(config: AppConfig | ResolvedAppConfig): config is ResolvedAppConfig {
   return typeof (config as Partial<ResolvedAppConfig>).dataDir === "string";
 }
 
-export interface RuntimeEngineOptions {
-  configPath?: string;
-}
+export interface RuntimeEngineOptions extends DaemonRuntimeOptions {}
 
 export class RuntimeEngine {
   private runtime?: DaemonRuntime;
@@ -36,7 +34,7 @@ export class RuntimeEngine {
         this.resolvedConfig,
         this.logger,
         this.loopScheduler,
-        this.options.configPath,
+        this.options,
       );
     }
     return this.runtime;

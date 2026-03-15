@@ -111,6 +111,32 @@ describe("agent adapter factory", () => {
     }
   });
 
+  test("preserves agent-specific passthrough options", () => {
+    const logger = new Logger("error");
+    const adapter = stubAdapter("codex");
+    vi.mocked(codex.createCodexAdapter).mockReturnValue(adapter as never);
+
+    createAgentAdapter(
+      makeProject("codex", {
+        cmd: "codex",
+        mode: "full-auto",
+        reasoning_effort: "high",
+        search: true,
+      }),
+      logger,
+    );
+
+    expect(codex.createCodexAdapter).toHaveBeenCalledWith(
+      {
+        cmd: "codex",
+        mode: "full-auto",
+        reasoning_effort: "high",
+        search: true,
+      },
+      logger,
+    );
+  });
+
   test("rejects unsupported agent types", () => {
     const logger = new Logger("error");
     expect(() =>
