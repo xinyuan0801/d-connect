@@ -1,9 +1,10 @@
-import type { DeliveryTarget, HistoryEntry } from "../core/types.js";
+import type { DeliveryTarget, HistoryEntry, TeamState } from "../core/types.js";
 
 export interface SessionRecord {
   id: string;
   name: string;
   agentSessionId: string;
+  teamState?: TeamState;
   history: HistoryEntry[];
   createdAt: string;
   updatedAt: string;
@@ -22,6 +23,7 @@ export interface SessionRepository {
   tryLock(session: SessionRecord): boolean;
   unlock(session: SessionRecord): void;
   addHistory(session: SessionRecord, role: "user" | "assistant", content: string): void;
+  setTeamState(session: SessionRecord, teamState?: TeamState): void;
   getDeliveryTarget(userKey: string): DeliveryTarget | undefined;
   setDeliveryTarget(userKey: string, target: DeliveryTarget): void;
 }

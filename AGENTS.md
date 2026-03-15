@@ -131,6 +131,13 @@ pnpm run dev restart -c ./config.json
 - 续聊使用 `opencode run --session <session_id> <prompt>`
 - 会话 ID 与消息内容主要从 CLI 顶层 `sessionID` / `part` 事件流里提取
 
+当前已落地的 `claudecode` agent team 补充：
+
+- `d-connect` 会默认给 `claudecode` 注入 agent team 所需的环境开关；只有用户自己显式覆盖时才尊重覆盖值
+- lead 仍然复用原来的 IM session；teammate 生命周期、任务进度和摘要消息会作为结构化事件回投到同一条聊天时间线
+- `/team`、`/team members`、`/team tasks` 会读取持久化 `session.teamState`，并优先用本地 `~/.claude/teams/*` / `~/.claude/tasks/*` snapshot 刷新
+- `/team ask <member> <message>`、`/team stop <member>`、`/team cleanup` 只会转发固定 prompt 给 lead agent，不直接写 Claude mailbox 文件
+
 ### 新增 IM 平台支持
 
 通常需要同时修改：
@@ -175,6 +182,7 @@ D_CONNECT_REAL_AGENT_E2E=1 pnpm test tests/daemon-real-tooling.test.ts
 - `tests/runtime-real-agent.test.ts` 仍然使用内存里的 fake platform，因此 platform 侧保持解耦；但 agent 侧会走真实 CLI。
 - `tests/daemon-real-ipc.test.ts` 会启动真实 `RuntimeEngine + LoopScheduler + IpcServer`，通过真实 IPC `/send`、`/loop/add`、`/loop/list`、`/loop/del` 跑完整 daemon 链路。
 - `tests/daemon-real-tooling.test.ts` 会通过真实 daemon IPC 验证 agent 的工具调用事件渲染和多轮复杂输出。
+- `tests/daemon-real-tooling.test.ts` 现在也包含 `claudecode` 的 agent team smoke：真实创建 team、spawn teammate，并通过 `/team tasks` 回读本地 Claude snapshot。
 - 可通过 `D_CONNECT_REAL_AGENT_TYPES` 指定要跑的 agent 子集，支持：`claudecode`、`codex`、`opencode`、`qoder`、`iflow`。
 - `tests/daemon-real-ipc.test.ts` 也支持 `D_CONNECT_REAL_IPC_AGENT_TYPES`；`tests/daemon-real-tooling.test.ts` 也支持 `D_CONNECT_REAL_TOOL_AGENT_TYPES`。
 - 若本机命令名不是默认值，可分别用 `D_CONNECT_E2E_CLAUDE_CMD`、`D_CONNECT_E2E_CODEX_CMD`、`D_CONNECT_E2E_OPENCODE_CMD`、`D_CONNECT_E2E_QODER_CMD`、`D_CONNECT_E2E_IFLOW_CMD` 覆盖。
@@ -197,6 +205,7 @@ D_CONNECT_REAL_AGENT_E2E=1 pnpm test tests/daemon-real-tooling.test.ts
 - `loop` 回投依赖某个 `sessionKey` 最近一次成功建立的 `DeliveryTarget`；该信息持久化在 `.d-connect/sessions/sessions.json`。
 - `loop` 默认按 `job.id` 使用隔离的执行会话，不继承聊天 `sessionKey` 的历史上下文；只有回投目标仍然复用原始 `sessionKey` 对应的 `DeliveryTarget`。
 - 若守护进程重启后 `loop` 不回投，先确认该 `sessionKey` 是否收到过真实平台消息，以及平台是否支持 `send()` 异步发送。
+- Claude agent team 的本地状态目录固定在 `~/.claude/teams/*` 和 `~/.claude/tasks/*`；排查 `/team` 状态不对时，先看这些文件是否存在、`leadSessionId` 是否仍匹配当前 `agentSessionId`。
 
 ### DingTalk 排障经验
 

@@ -13,6 +13,80 @@ export interface DeliveryTarget {
 
 export type LoopContextMode = "isolated" | "shared";
 
+export type TeamTaskStatus = "pending" | "in_progress" | "completed" | "unknown";
+export type TeamMemberStatus = "starting" | "working" | "available" | "idle" | "stopped" | "unknown";
+
+export type TeamEventKind =
+  | "team_created"
+  | "team_deleted"
+  | "member_spawned"
+  | "task_started"
+  | "task_completed"
+  | "member_idle"
+  | "message";
+
+export interface TeamEventPayload {
+  kind: TeamEventKind;
+  teamName?: string;
+  teamFilePath?: string;
+  leadAgentId?: string;
+  memberName?: string;
+  memberId?: string;
+  agentType?: string;
+  model?: string;
+  color?: string;
+  taskId?: string;
+  taskStatus?: TeamTaskStatus;
+  taskSubject?: string;
+  taskDescription?: string;
+  summary?: string;
+  idleReason?: string;
+  planModeRequired?: boolean;
+  timestamp?: string;
+}
+
+export interface TeamMemberState {
+  memberId: string;
+  memberName: string;
+  agentType?: string;
+  model?: string;
+  color?: string;
+  status: TeamMemberStatus;
+  planModeRequired?: boolean;
+  updatedAt?: string;
+}
+
+export interface TeamTaskState {
+  taskId: string;
+  subject?: string;
+  description?: string;
+  status: TeamTaskStatus;
+  memberId?: string;
+  memberName?: string;
+  updatedAt?: string;
+}
+
+export interface TeamMessageState {
+  id: string;
+  memberId?: string;
+  memberName: string;
+  content: string;
+  summary?: string;
+  color?: string;
+  timestamp: string;
+}
+
+export interface TeamState {
+  active: boolean;
+  teamName: string;
+  teamFilePath?: string;
+  leadAgentId?: string;
+  members: Record<string, TeamMemberState>;
+  tasks: Record<string, TeamTaskState>;
+  messages: TeamMessageState[];
+  updatedAt: string;
+}
+
 export interface InboundMessage {
   sessionKey: string;
   platform: string;
@@ -46,7 +120,9 @@ export type AgentEventType =
   | "tool_result"
   | "result"
   | "error"
-  | "permission_request";
+  | "permission_request"
+  | "team_event"
+  | "team_message";
 
 export interface AgentEvent {
   type: AgentEventType;
@@ -54,6 +130,7 @@ export interface AgentEvent {
   toolName?: string;
   toolInput?: string;
   toolInputRaw?: Record<string, unknown>;
+  team?: TeamEventPayload;
   sessionId?: string;
   requestId?: string;
   error?: Error;

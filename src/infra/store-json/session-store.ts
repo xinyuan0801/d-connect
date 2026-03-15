@@ -153,6 +153,11 @@ export class SessionStore implements SessionRepository {
     session.updatedAt = new Date().toISOString();
   }
 
+  setTeamState(session: SessionRecord, teamState?: SessionRecord["teamState"]): void {
+    session.teamState = teamState;
+    session.updatedAt = new Date().toISOString();
+  }
+
   getDeliveryTarget(userKey: string): DeliveryTarget | undefined {
     return this.deliveryTargets.get(userKey);
   }

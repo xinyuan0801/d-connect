@@ -1,9 +1,12 @@
+import type { TeamMemberState, TeamState, TeamTaskState } from "../core/types.js";
 import type { ProjectRuntime } from "./project-registry.js";
 import type { SessionRecord } from "./session-repository.js";
 import { ConversationService } from "./conversation-service.js";
 import { LoopScheduler } from "../scheduler/loop.js";
 import cron from "node-cron";
 import { resolve } from "node:path";
+import { findClaudeTeamStateByLeadSessionId, readClaudeTeamState } from "../adapters/agent/claudecode-team.js";
+import { mergeTeamStates } from "./team-state.js";
 
 export interface CommandContext {
   runtime: ProjectRuntime;
@@ -94,12 +97,183 @@ function buildLoopCommandPrompt(project: string, sessionKey: string, request: st
   return lines.join("\n");
 }
 
+function pickClaudeHomeDir(runtime: ProjectRuntime): string | undefined {
+  const homeDir = runtime.config.agent.options.env?.HOME;
+  return typeof homeDir === "string" && homeDir.trim().length > 0 ? homeDir : undefined;
+}
+
+function supportsTeamCommands(runtime: ProjectRuntime): boolean {
+  return runtime.config.agent.type === "claudecode";
+}
+
+function translateMemberStatus(status: TeamMemberState["status"]): string {
+  switch (status) {
+    case "starting":
+      return "启动中";
+    case "working":
+      return "执行中";
+    case "available":
+      return "可接单";
+    case "idle":
+      return "待命";
+    case "stopped":
+      return "已停止";
+    default:
+      return "未知";
+  }
+}
+
+function translateTaskStatus(status: TeamTaskState["status"]): string {
+  switch (status) {
+    case "pending":
+      return "待处理";
+    case "in_progress":
+      return "进行中";
+    case "completed":
+      return "已完成";
+    default:
+      return "未知";
+  }
+}
+
+function sortMembers(teamState: TeamState): TeamMemberState[] {
+  return Object.values(teamState.members).sort((left, right) => left.memberName.localeCompare(right.memberName));
+}
+
+function sortTasks(teamState: TeamState): TeamTaskState[] {
+  return Object.values(teamState.tasks).sort((left, right) => left.taskId.localeCompare(right.taskId));
+}
+
+function buildNoActiveTeamResponse(teamState?: TeamState): string {
+  if (teamState?.teamName) {
+    return `当前没有活跃的 Claude agent team。最近一次 team：${teamState.teamName}（已结束）。`;
+  }
+  return "当前没有活跃的 Claude agent team。";
+}
+
+function buildTeamStatusResponse(teamState: TeamState): string {
+  const tasks = sortTasks(teamState);
+  const inProgress = tasks.filter((task) => task.status === "in_progress").length;
+  const completed = tasks.filter((task) => task.status === "completed").length;
+
+  return [
+    `Team ${teamState.teamName}`,
+    `状态：${teamState.active ? "active" : "inactive"}`,
+    `Lead：${teamState.leadAgentId ?? "-"}`,
+    `成员：${Object.keys(teamState.members).length}`,
+    `任务：${tasks.length}（进行中 ${inProgress}，已完成 ${completed}）`,
+    `最近更新：${teamState.updatedAt}`,
+  ].join("\n");
+}
+
+function buildTeamMembersResponse(teamState: TeamState): string {
+  const members = sortMembers(teamState);
+  if (members.length === 0) {
+    return `Team ${teamState.teamName} 当前还没有记录到成员。`;
+  }
+
+  return [
+    `Team ${teamState.teamName} 成员：`,
+    ...members.map((member) => {
+      const runtime = [member.agentType, member.model].filter(Boolean).join("/");
+      const suffix = [
+        translateMemberStatus(member.status),
+        runtime || "-",
+        member.planModeRequired === true ? "plan-mode" : "",
+      ]
+        .filter(Boolean)
+        .join("\t");
+      return `${member.memberName}\t${suffix}`;
+    }),
+  ].join("\n");
+}
+
+function buildTeamTasksResponse(teamState: TeamState): string {
+  const tasks = sortTasks(teamState);
+  if (tasks.length === 0) {
+    return `Team ${teamState.teamName} 当前没有任务记录。`;
+  }
+
+  return [
+    `Team ${teamState.teamName} 任务：`,
+    ...tasks.map((task) => {
+      const subject = task.subject || task.description || "-";
+      return `${task.taskId}\t${translateTaskStatus(task.status)}\t${task.memberName ?? "-"}\t${subject}`;
+    }),
+  ].join("\n");
+}
+
+function buildTeamAskPrompt(teamState: TeamState, memberName: string, message: string): string {
+  return [
+    "你当前正在使用 Claude Code agent team。",
+    `当前 team: ${teamState.teamName}`,
+    `请把下面的任务交给 teammate ${memberName}。`,
+    "如果找不到这个 teammate，先列出当前成员并明确说明无法转达。",
+    "请直接在 team 内部协作，不要要求 d-connect 代写 mailbox 文件。",
+    `任务内容：${message}`,
+  ].join("\n");
+}
+
+function buildTeamStopPrompt(teamState: TeamState, memberName: string): string {
+  return [
+    "你当前正在使用 Claude Code agent team。",
+    `当前 team: ${teamState.teamName}`,
+    `请通知 teammate ${memberName} 停止当前任务，并汇总它已经完成的部分。`,
+    "如果该 teammate 不存在，请先列出当前成员并说明。",
+  ].join("\n");
+}
+
+function buildTeamCleanupPrompt(teamState: TeamState): string {
+  return [
+    "你当前正在使用 Claude Code agent team。",
+    `当前 team: ${teamState.teamName}`,
+    "请清理当前 agent team：停止仍在运行的 teammate，收集剩余总结，并在完成后删除这个 team。",
+    "如果某个成员仍有未完成任务，请先给出清理前的阻塞说明。",
+  ].join("\n");
+}
+
 export class CommandService {
   constructor(
     private readonly conversations: ConversationService,
     private readonly loopScheduler?: LoopScheduler,
     private readonly configPath?: string,
   ) {}
+
+  private async resolveClaudeTeamState(runtime: ProjectRuntime, session: SessionRecord): Promise<TeamState | undefined> {
+    if (!supportsTeamCommands(runtime)) {
+      return undefined;
+    }
+
+    const options = { homeDir: pickClaudeHomeDir(runtime) };
+    const persisted = session.teamState;
+
+    let fresh: TeamState | undefined;
+    if (persisted?.teamName) {
+      fresh = await readClaudeTeamState(persisted.teamName, options);
+    }
+    if (!fresh && session.agentSessionId.trim().length > 0) {
+      fresh = await findClaudeTeamStateByLeadSessionId(session.agentSessionId, options);
+    }
+
+    if (!fresh) {
+      if (persisted?.active) {
+        const inactive: TeamState = {
+          ...persisted,
+          active: false,
+          updatedAt: new Date().toISOString(),
+        };
+        this.conversations.setTeamState(session, inactive);
+        await this.conversations.save();
+        return inactive;
+      }
+      return persisted;
+    }
+
+    const merged = mergeTeamStates(persisted, fresh) ?? fresh;
+    this.conversations.setTeamState(session, merged);
+    await this.conversations.save();
+    return merged;
+  }
 
   async handle(context: CommandContext): Promise<CommandResult> {
     const { runtime, project, sessionKey, session, raw } = context;
@@ -115,6 +289,12 @@ export class CommandService {
           "/list  列出当前聊天对象下的会话清单",
           "/switch <id|name>  切到指定会话，别让上下文继续串门",
           "/stop  停掉当前会话对应的 Agent 进程，让 CPU 先喘口气",
+          "/team  查看当前 Claude agent team 的状态",
+          "/team members  查看当前 team 成员",
+          "/team tasks  查看当前 team 任务",
+          "/team ask <member> <message>  让 lead 把任务转给指定 teammate",
+          "/team stop <member>  让 lead 停掉指定 teammate 的当前任务",
+          "/team cleanup  让 lead 清理并收尾当前 team",
           "/loop <request>  用自然语言描述一个定时任务",
           "/loop list  查看当前聊天对象下的 loop 任务",
           "/loop add <expr> <prompt>  直接创建 loop，和闹钟一样准时烦人",
@@ -168,6 +348,78 @@ export class CommandService {
         this.conversations.clearAgentSession(session);
         await this.conversations.save();
         return handled(`已停止会话 ${session.id}。风扇声应该会礼貌一点。`);
+      }
+
+      case "team": {
+        if (!supportsTeamCommands(runtime)) {
+          return handled("当前 agent 不支持 /team。v1 只给 Claude Code agent team 开门。");
+        }
+
+        const sub = (parts[1] ?? "").toLowerCase();
+        if (!sub || sub === "status") {
+          const teamState = await this.resolveClaudeTeamState(runtime, session);
+          return handled(teamState?.active ? buildTeamStatusResponse(teamState) : buildNoActiveTeamResponse(teamState));
+        }
+
+        if (sub === "help") {
+          return handled(
+            "用法：/team | /team help | /team members | /team tasks | /team ask <member> <message> | /team stop <member> | /team cleanup",
+          );
+        }
+
+        if (sub === "members") {
+          const teamState = await this.resolveClaudeTeamState(runtime, session);
+          return handled(teamState?.active ? buildTeamMembersResponse(teamState) : buildNoActiveTeamResponse(teamState));
+        }
+
+        if (sub === "tasks") {
+          const teamState = await this.resolveClaudeTeamState(runtime, session);
+          return handled(teamState?.active ? buildTeamTasksResponse(teamState) : buildNoActiveTeamResponse(teamState));
+        }
+
+        if (sub === "ask") {
+          const memberName = parts[2]?.trim();
+          const message = parts.slice(3).join(" ").trim();
+          if (!memberName || !message) {
+            return handled("用法：/team ask <member> <message>。不给人名和任务，lead 也没法代你分工。");
+          }
+          const teamState = await this.resolveClaudeTeamState(runtime, session);
+          if (!teamState?.active) {
+            return handled(buildNoActiveTeamResponse(teamState));
+          }
+          return {
+            kind: "forward_to_agent",
+            prompt: buildTeamAskPrompt(teamState, memberName, message),
+          };
+        }
+
+        if (sub === "stop") {
+          const memberName = parts[2]?.trim();
+          if (!memberName) {
+            return handled("用法：/team stop <member>。不给成员名，我也不敢随便喊停。");
+          }
+          const teamState = await this.resolveClaudeTeamState(runtime, session);
+          if (!teamState?.active) {
+            return handled(buildNoActiveTeamResponse(teamState));
+          }
+          return {
+            kind: "forward_to_agent",
+            prompt: buildTeamStopPrompt(teamState, memberName),
+          };
+        }
+
+        if (sub === "cleanup") {
+          const teamState = await this.resolveClaudeTeamState(runtime, session);
+          if (!teamState?.active) {
+            return handled(buildNoActiveTeamResponse(teamState));
+          }
+          return {
+            kind: "forward_to_agent",
+            prompt: buildTeamCleanupPrompt(teamState),
+          };
+        }
+
+        return handled("用法：/team | /team help | /team members | /team tasks | /team ask <member> <message> | /team stop <member> | /team cleanup");
       }
 
       case "loop": {

@@ -91,6 +91,34 @@ describe("claudecode adapter", () => {
     expect(invocation.args[argIndex + 1]).toBe("hello");
   });
 
+  test("enables Claude agent team env by default while preserving explicit overrides", () => {
+    const adapter = new ClaudeCodeAdapter(
+      {
+        cmd: "claude",
+      },
+      new Logger("error"),
+    );
+
+    const invocation = (adapter as any).buildInvocation("hello", "") as {
+      env?: Record<string, string>;
+    };
+    expect(invocation.env?.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS).toBe("1");
+
+    const overridden = new ClaudeCodeAdapter(
+      {
+        cmd: "claude",
+        env: {
+          CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "0",
+        },
+      },
+      new Logger("error"),
+    );
+    const overriddenInvocation = (overridden as any).buildInvocation("hello", "") as {
+      env?: Record<string, string>;
+    };
+    expect(overriddenInvocation.env?.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS).toBe("0");
+  });
+
   test("parseOutputLine emits text, reasoning and tool events for assistant stream", async () => {
     const adapter = new ClaudeCodeAdapter(
       {
@@ -179,6 +207,168 @@ describe("claudecode adapter", () => {
         type: "tool_result",
         sessionId: "session-user",
         content: "ok",
+      },
+    ]);
+
+    await adapter.stop();
+  });
+
+  test("parseOutputLine emits team created event from structured tool result", async () => {
+    const adapter = new ClaudeCodeAdapter(
+      {
+        cmd: "claude",
+        workDir: "/Users/felixwang/Desktop/d-connect",
+      },
+      new Logger("error"),
+    );
+    const session = (await adapter.startSession("session-team-create")) as any;
+
+    const output = session.parseOutputLine(
+      "stdout",
+      JSON.stringify({
+        type: "user",
+        session_id: "session-team-create",
+        tool_use_result: {
+          team_name: "alpha-team",
+          team_file_path: "/tmp/.claude/teams/alpha-team/config.json",
+          lead_agent_id: "lead-1",
+        },
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "TeamCreate:toolu_123",
+              content: [{ type: "text", text: "team created" }],
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(output).toEqual([
+      {
+        type: "team_event",
+        sessionId: "session-team-create",
+        requestId: "TeamCreate:toolu_123",
+        team: {
+          kind: "team_created",
+          teamName: "alpha-team",
+          teamFilePath: "/tmp/.claude/teams/alpha-team/config.json",
+          leadAgentId: "lead-1",
+        },
+      },
+      {
+        type: "tool_result",
+        sessionId: "session-team-create",
+        requestId: "TeamCreate:toolu_123",
+        toolName: "TeamCreate",
+        content: "team created",
+      },
+    ]);
+
+    await adapter.stop();
+  });
+
+  test("parseOutputLine emits member spawned event from agent tool result", async () => {
+    const adapter = new ClaudeCodeAdapter(
+      {
+        cmd: "claude",
+        workDir: "/Users/felixwang/Desktop/d-connect",
+      },
+      new Logger("error"),
+    );
+    const session = (await adapter.startSession("session-team-agent")) as any;
+
+    const output = session.parseOutputLine(
+      "stdout",
+      JSON.stringify({
+        type: "user",
+        session_id: "session-team-agent",
+        tool_use_result: {
+          status: "teammate_spawned",
+          team_name: "alpha-team",
+          teammate_id: "agent-bob",
+          name: "Bob",
+          agent_type: "research",
+          model: "claude-sonnet-4-5",
+          color: "blue",
+          plan_mode_required: true,
+        },
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "Agent:toolu_456",
+              content: [{ type: "text", text: "spawned" }],
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(output).toEqual([
+      {
+        type: "team_event",
+        sessionId: "session-team-agent",
+        requestId: "Agent:toolu_456",
+        team: {
+          kind: "member_spawned",
+          teamName: "alpha-team",
+          memberName: "Bob",
+          memberId: "agent-bob",
+          agentType: "research",
+          model: "claude-sonnet-4-5",
+          color: "blue",
+          planModeRequired: true,
+        },
+      },
+      {
+        type: "tool_result",
+        sessionId: "session-team-agent",
+        requestId: "Agent:toolu_456",
+        toolName: "Agent",
+        content: "spawned",
+      },
+    ]);
+
+    await adapter.stop();
+  });
+
+  test("parseOutputLine emits teammate task started system event", async () => {
+    const adapter = new ClaudeCodeAdapter(
+      {
+        cmd: "claude",
+        workDir: "/Users/felixwang/Desktop/d-connect",
+      },
+      new Logger("error"),
+    );
+    const session = (await adapter.startSession("session-task-start")) as any;
+
+    const output = session.parseOutputLine(
+      "stdout",
+      JSON.stringify({
+        type: "system",
+        session_id: "session-task-start",
+        subtype: "task_started",
+        task_type: "in_process_teammate",
+        tool_use_id: "Agent:toolu_789",
+        task_id: "12",
+        description: "Bob: Investigate the failing build",
+      }),
+    );
+
+    expect(output).toEqual([
+      {
+        type: "team_event",
+        sessionId: "session-task-start",
+        requestId: "Agent:toolu_789",
+        team: {
+          kind: "task_started",
+          memberName: "Bob",
+          taskId: "12",
+          taskStatus: "in_progress",
+          taskDescription: "Bob: Investigate the failing build",
+        },
       },
     ]);
 

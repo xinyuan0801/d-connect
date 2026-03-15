@@ -209,6 +209,12 @@ d-connect start
 - 会话 ID 与消息内容从 CLI 的顶层 `sessionID` / `part` 流式事件里提取。
 - `agent.options.model` 会映射到 `--model`。
 
+### Claude Code Agent Team 补充
+
+- Claude Code agent team 仍然复用当前聊天 session；lead 继续作为默认聊天入口，teammate 活动会以结构化进度卡片回投到同一条 IM 时间线。
+- `d-connect` 会默认替 `claudecode` 打开 agent team 所需的环境开关；只有你自己显式覆盖时才会使用自定义值。
+- Claude 本地 team 状态目录位于 `~/.claude/teams/*`，任务文件位于 `~/.claude/tasks/*`；`d-connect` 会读取这些文件来恢复 `/team` 状态和 teammate 摘要。
+
 ## 聊天内命令
 
 在 IM 中发送 `/` 开头消息即可：
@@ -220,6 +226,12 @@ d-connect start
 | `/list` | 列出当前聊天对象下的 session |
 | `/switch <id|name>` | 切换到指定 session |
 | `/stop` | 停止当前活跃 session 对应的 Agent 进程 |
+| `/team` | 查看当前 Claude agent team 状态 |
+| `/team members` | 查看当前 team 成员 |
+| `/team tasks` | 查看当前 team 任务 |
+| `/team ask <member> <message>` | 让 lead 把任务转给指定 teammate |
+| `/team stop <member>` | 让 lead 停掉指定 teammate 的当前任务 |
+| `/team cleanup` | 让 lead 清理并收尾当前 team |
 | `/loop <request>` | 用自然语言描述定时任务 |
 | `/loop list` | 列出当前聊天对象下的 loop |
 | `/loop add <expr> <prompt>` | 直接创建 loop |
@@ -227,6 +239,7 @@ d-connect start
 
 这些命令的回执默认是中文提示，偶尔会夹带一点不影响下班的冷幽默。
 `loop` 默认使用每条任务独立的执行会话，不继承当前聊天 session 的历史；任务结果仍会回投到创建它的那个聊天对象。
+`/team` 系列命令目前只对 `claudecode` 生效：`/team`、`/team members`、`/team tasks` 会优先读取本地 `~/.claude` snapshot，`/team ask|stop|cleanup` 则转发固定 prompt 给 lead agent，不会直接改写 Claude 的 mailbox 文件。
 
 ## 常用 CLI 命令
 

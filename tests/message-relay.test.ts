@@ -81,6 +81,79 @@ describe("message relay formatter", () => {
     expect(splitResponseMessages("done", events)).toEqual(["🛠️ run_shell_command\n````printf '```markdown```'````"]);
   });
 
+  test("renders structured Claude team events and suppresses raw team tool noise", () => {
+    const events: AgentEvent[] = [
+      {
+        type: "tool_use",
+        toolName: "TeamCreate",
+        requestId: "TeamCreate:1",
+        toolInputRaw: {
+          name: "alpha-team",
+        },
+      },
+      {
+        type: "team_event",
+        requestId: "TeamCreate:1",
+        team: {
+          kind: "team_created",
+          teamName: "alpha-team",
+        },
+      },
+      {
+        type: "tool_use",
+        toolName: "Agent",
+        requestId: "Agent:1",
+        toolInputRaw: {
+          team_name: "alpha-team",
+          description: "Ask Alice to investigate",
+        },
+      },
+      {
+        type: "team_event",
+        requestId: "Agent:1",
+        team: {
+          kind: "member_spawned",
+          memberName: "Alice",
+          agentType: "research",
+          model: "claude-sonnet-4-5",
+        },
+      },
+      {
+        type: "team_event",
+        team: {
+          kind: "task_started",
+          memberName: "Alice",
+          taskDescription: "Alice: investigate failing build",
+        },
+      },
+      {
+        type: "team_message",
+        content: "Pinned the issue to the retry path.",
+        team: {
+          kind: "message",
+          memberName: "Alice",
+          summary: "Retry path isolated",
+        },
+      },
+      {
+        type: "team_event",
+        team: {
+          kind: "task_completed",
+          memberName: "Alice",
+          taskSubject: "retry path investigation",
+        },
+      },
+    ];
+
+    expect(splitResponseMessages("done", events)).toEqual([
+      "🤝 Team alpha-team 已创建",
+      "👤 Alice · research/claude-sonnet-4-5 已加入",
+      "📌 Alice 开始：Alice: investigate failing build",
+      "👤 Alice\n摘要：Retry path isolated\nPinned the issue to the retry path.",
+      "✅ Alice 完成：retry path investigation",
+    ]);
+  });
+
   test("computes suffix for non-text response bodies", () => {
     const events: AgentEvent[] = [
       {

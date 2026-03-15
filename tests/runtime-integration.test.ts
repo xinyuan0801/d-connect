@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, test } from "vitest";
 import type { ResolvedAppConfig, ResolvedGuardConfig } from "../src/config/normalize.js";
 import { Logger } from "../src/logging.js";
@@ -64,6 +64,11 @@ function createInboundPlatformMessage(content: string, messageId: string): Inbou
     },
     deliveryTarget: CHAT_TARGET,
   };
+}
+
+async function writeJson(path: string, value: unknown): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, JSON.stringify(value), "utf8");
 }
 
 class FakeSession extends EventEmitter implements AgentSession {
@@ -137,6 +142,150 @@ class FakeAgent implements AgentAdapter {
 
   async startSession(_sessionId?: string): Promise<AgentSession> {
     const session = new FakeSession(this);
+    this.sessions.push(session);
+    return session;
+  }
+
+  async stop(): Promise<void> {
+    // noop
+  }
+}
+
+class FakeTeamSession extends EventEmitter implements AgentSession {
+  public prompts: string[] = [];
+
+  constructor(
+    private readonly homeDir: string,
+    private readonly id = "lead-session-1",
+  ) {
+    super();
+  }
+
+  private async writeTeamFiles(): Promise<void> {
+    await writeJson(join(this.homeDir, ".claude", "teams", "alpha-team", "config.json"), {
+      name: "alpha-team",
+      leadAgentId: "lead-1",
+      leadSessionId: this.id,
+      members: [
+        {
+          agentId: "agent-alice",
+          name: "Alice",
+          agentType: "research",
+          model: "claude-sonnet-4-5",
+          color: "blue",
+        },
+      ],
+    });
+    await writeJson(join(this.homeDir, ".claude", "teams", "alpha-team", "inboxes", "team-lead.json"), [
+      {
+        from: "Alice",
+        text: "Pinned the issue to retry path.",
+        summary: "Retry path isolated",
+        timestamp: "2026-03-15T10:00:00.000Z",
+        color: "blue",
+      },
+    ]);
+    await writeJson(join(this.homeDir, ".claude", "tasks", "alpha-team", "1.json"), {
+      id: "1",
+      subject: "Alice",
+      description: "retry path investigation",
+      status: "completed",
+    });
+  }
+
+  async send(prompt: string): Promise<void> {
+    this.prompts.push(prompt);
+    await this.writeTeamFiles();
+
+    this.emit("event", {
+      type: "team_event",
+      sessionId: this.id,
+      team: {
+        kind: "team_created",
+        teamName: "alpha-team",
+        leadAgentId: "lead-1",
+      },
+    } satisfies AgentEvent);
+    this.emit("event", {
+      type: "team_event",
+      sessionId: this.id,
+      team: {
+        kind: "member_spawned",
+        teamName: "alpha-team",
+        memberName: "Alice",
+        memberId: "agent-alice",
+        agentType: "research",
+        model: "claude-sonnet-4-5",
+      },
+    } satisfies AgentEvent);
+    this.emit("event", {
+      type: "team_event",
+      sessionId: this.id,
+      team: {
+        kind: "task_started",
+        teamName: "alpha-team",
+        memberName: "Alice",
+        taskId: "1",
+        taskStatus: "in_progress",
+        taskDescription: "Alice: investigate failing build",
+      },
+    } satisfies AgentEvent);
+    this.emit("event", {
+      type: "team_message",
+      sessionId: this.id,
+      content: "Pinned the issue to retry path.",
+      team: {
+        kind: "message",
+        teamName: "alpha-team",
+        memberName: "Alice",
+        summary: "Retry path isolated",
+      },
+    } satisfies AgentEvent);
+    this.emit("event", {
+      type: "team_event",
+      sessionId: this.id,
+      team: {
+        kind: "task_completed",
+        teamName: "alpha-team",
+        memberName: "Alice",
+        taskId: "1",
+        taskStatus: "completed",
+        taskSubject: "retry path investigation",
+      },
+    } satisfies AgentEvent);
+    this.emit("event", {
+      type: "result",
+      sessionId: this.id,
+      content: `lead summary:${prompt}`,
+      done: true,
+    } satisfies AgentEvent);
+  }
+
+  async respondPermission(_requestId: string, _result: PermissionResult): Promise<void> {
+    // noop
+  }
+
+  currentSessionId(): string {
+    return this.id;
+  }
+
+  isAlive(): boolean {
+    return true;
+  }
+
+  async close(): Promise<void> {
+    // noop
+  }
+}
+
+class FakeTeamAgent implements AgentAdapter {
+  readonly name = "fake-team-agent";
+  public sessions: FakeTeamSession[] = [];
+
+  constructor(private readonly homeDir: string) {}
+
+  async startSession(): Promise<AgentSession> {
+    const session = new FakeTeamSession(this.homeDir);
     this.sessions.push(session);
     return session;
   }
@@ -369,6 +518,50 @@ describe("runtime integration", () => {
       "reply:done:ping",
       "end:om_1:completed",
     ]);
+
+    await runtime.stop();
+  });
+
+  test("streams structured team timeline and serves /team tasks from local claude snapshots", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "d-connect-runtime-"));
+    const homeDir = await mkdtemp(join(tmpdir(), "d-connect-runtime-home-"));
+    const config = createResolvedConfig(dataDir);
+    config.projects[0]!.agent.options.env = {
+      HOME: homeDir,
+    };
+
+    const state = createRuntimeFixtureState();
+    const runtime = new RuntimeEngine(config, new Logger("error"), undefined, {
+      projectRegistry: {
+        createAgentAdapter: () => new FakeTeamAgent(homeDir),
+        createPlatformAdapters: () => {
+          const platform = new FakePlatform();
+          state.platforms.push(platform);
+          return [platform];
+        },
+      },
+    });
+    await runtime.start();
+
+    const platform = state.platforms[0];
+    await platform?.deliver(createInboundPlatformMessage("start team", "om_team"));
+
+    expect(platform?.replies.map((item) => item.content)).toEqual([
+      "🤝 Team alpha-team 已创建",
+      "👤 Alice · research/claude-sonnet-4-5 已加入",
+      "📌 Alice 开始：Alice: investigate failing build",
+      "👤 Alice\n摘要：Retry path isolated\nPinned the issue to retry path.",
+      "✅ Alice 完成：retry path investigation",
+      "lead summary:start team",
+    ]);
+
+    const tasks = await runtime.send({
+      project: "demo",
+      sessionKey: CHAT_SESSION_KEY,
+      content: "/team tasks",
+    });
+    expect(tasks.response).toContain("Team alpha-team 任务：");
+    expect(tasks.response).toContain("1\t已完成\tAlice\tAlice");
 
     await runtime.stop();
   });

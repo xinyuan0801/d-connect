@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { describe, expect, test } from "vitest";
 import { Logger } from "../src/logging.js";
 import { createSessionStore } from "../src/runtime/session-store.js";
@@ -114,6 +114,57 @@ async function createHarness(configPath?: string) {
     loop,
     runtime,
   };
+}
+
+async function writeJson(path: string, value: unknown): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, JSON.stringify(value), "utf8");
+}
+
+async function createClaudeTeamFiles(homeDir: string): Promise<void> {
+  await writeJson(join(homeDir, ".claude", "teams", "alpha-team", "config.json"), {
+    name: "alpha-team",
+    leadAgentId: "lead-1",
+    leadSessionId: "lead-session-1",
+    members: [
+      {
+        agentId: "agent-alice",
+        name: "Alice",
+        agentType: "research",
+        model: "claude-sonnet-4-5",
+        color: "blue",
+      },
+      {
+        agentId: "agent-bob",
+        name: "Bob",
+        agentType: "implementer",
+        model: "claude-opus-4-1",
+        color: "green",
+        planModeRequired: true,
+      },
+    ],
+  });
+  await writeJson(join(homeDir, ".claude", "teams", "alpha-team", "inboxes", "team-lead.json"), [
+    {
+      from: "Alice",
+      text: "Root cause isolated.",
+      summary: "Root cause isolated",
+      timestamp: "2026-03-15T10:00:00.000Z",
+      color: "blue",
+    },
+  ]);
+  await writeJson(join(homeDir, ".claude", "tasks", "alpha-team", "1.json"), {
+    id: "1",
+    subject: "Alice",
+    description: "Investigate failing build",
+    status: "in_progress",
+  });
+  await writeJson(join(homeDir, ".claude", "tasks", "alpha-team", "2.json"), {
+    id: "2",
+    subject: "Bob",
+    description: "Patch retry path",
+    status: "completed",
+  });
 }
 
 function expectHandled(result: CommandResult): string {
@@ -482,5 +533,127 @@ describe("command service", () => {
       }),
     );
     expect(delMissing).toContain("没找到会话：missing-session。它可能改名了，也可能从没存在过。");
+  });
+
+  test("reads active Claude team status, members and tasks from local snapshots", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "d-connect-command-team-"));
+    await createClaudeTeamFiles(homeDir);
+
+    const { service, conversation, runtime } = await createHarness();
+    runtime.config.agent.options.env = {
+      HOME: homeDir,
+    };
+    const session = conversation.getOrCreateActiveSession("demo", "local:alice");
+    session.agentSessionId = "lead-session-1";
+
+    const status = expectHandled(await service.handle({
+      runtime,
+      project: "demo",
+      sessionKey: "local:alice",
+      session,
+      raw: "/team",
+    }));
+    expect(status).toContain("Team alpha-team");
+    expect(status).toContain("成员：2");
+    expect(status).toContain("任务：2（进行中 1，已完成 1）");
+
+    const members = expectHandled(await service.handle({
+      runtime,
+      project: "demo",
+      sessionKey: "local:alice",
+      session,
+      raw: "/team members",
+    }));
+    expect(members).toContain("Alice\t执行中\tresearch/claude-sonnet-4-5");
+    expect(members).toContain("Bob\t可接单\timplementer/claude-opus-4-1\tplan-mode");
+
+    const tasks = expectHandled(await service.handle({
+      runtime,
+      project: "demo",
+      sessionKey: "local:alice",
+      session,
+      raw: "/team tasks",
+    }));
+    expect(tasks).toContain("1\t进行中\tAlice\tAlice");
+    expect(tasks).toContain("2\t已完成\tBob\tBob");
+    expect(session.teamState?.teamName).toBe("alpha-team");
+    expect(session.teamState?.active).toBe(true);
+  });
+
+  test("returns no-active-team response when no Claude team is available", async () => {
+    const { service, conversation, runtime } = await createHarness();
+    const session = conversation.getOrCreateActiveSession("demo", "local:alice");
+    session.teamState = {
+      active: true,
+      teamName: "alpha-team",
+      members: {},
+      tasks: {},
+      messages: [],
+      updatedAt: "2026-03-15T10:00:00.000Z",
+    };
+
+    const status = expectHandled(await service.handle({
+      runtime,
+      project: "demo",
+      sessionKey: "local:alice",
+      session,
+      raw: "/team",
+    }));
+
+    expect(status).toBe("当前没有活跃的 Claude agent team。最近一次 team：alpha-team（已结束）。");
+    expect(session.teamState?.active).toBe(false);
+  });
+
+  test("forwards /team ask, /team stop and /team cleanup to the lead agent", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "d-connect-command-team-"));
+    await createClaudeTeamFiles(homeDir);
+
+    const { service, conversation, runtime } = await createHarness();
+    runtime.config.agent.options.env = {
+      HOME: homeDir,
+    };
+    const session = conversation.getOrCreateActiveSession("demo", "local:alice");
+    session.agentSessionId = "lead-session-1";
+
+    const ask = await service.handle({
+      runtime,
+      project: "demo",
+      sessionKey: "local:alice",
+      session,
+      raw: "/team ask Alice 请检查失败的构建",
+    });
+    expect(ask.kind).toBe("forward_to_agent");
+    if (ask.kind === "forward_to_agent") {
+      expect(ask.prompt).toContain("当前 team: alpha-team");
+      expect(ask.prompt).toContain("teammate Alice");
+      expect(ask.prompt).toContain("任务内容：请检查失败的构建");
+    }
+
+    const stop = await service.handle({
+      runtime,
+      project: "demo",
+      sessionKey: "local:alice",
+      session,
+      raw: "/team stop Bob",
+    });
+    expect(stop.kind).toBe("forward_to_agent");
+    if (stop.kind === "forward_to_agent") {
+      expect(stop.prompt).toContain("当前 team: alpha-team");
+      expect(stop.prompt).toContain("teammate Bob 停止当前任务");
+    }
+
+    const cleanup = await service.handle({
+      runtime,
+      project: "demo",
+      sessionKey: "local:alice",
+      session,
+      raw: "/team cleanup",
+    });
+    expect(cleanup.kind).toBe("forward_to_agent");
+    if (cleanup.kind === "forward_to_agent") {
+      expect(cleanup.prompt).toContain("当前 team: alpha-team");
+      expect(cleanup.prompt).toContain("请清理当前 agent team");
+      expect(cleanup.prompt).toContain("删除这个 team");
+    }
   });
 });

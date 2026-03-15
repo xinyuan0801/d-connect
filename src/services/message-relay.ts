@@ -85,6 +85,22 @@ function normalizeToolDescription(event: AgentEvent): string {
   return normalizeInlineText(pickString(toolInputRaw, ["description"]), MAX_TOOL_INPUT_LENGTH);
 }
 
+function isStructuredTeamToolUse(event: AgentEvent): boolean {
+  if (event.type !== "tool_use") {
+    return false;
+  }
+
+  if (event.toolName === "TeamCreate" || event.toolName === "TaskOutput" || event.toolName === "SendMessage") {
+    return true;
+  }
+
+  if (event.toolName !== "Agent") {
+    return false;
+  }
+
+  return typeof event.toolInputRaw?.team_name === "string" && event.toolInputRaw.team_name.trim().length > 0;
+}
+
 function normalizeToolInput(event: AgentEvent): string {
   if (event.toolName === "Agent") {
     const summarized = summarizeAgentToolInput(event.toolInputRaw);
@@ -98,6 +114,71 @@ function normalizeToolInput(event: AgentEvent): string {
     return "";
   }
   return normalizeInlineText(toolInput, MAX_TOOL_INPUT_LENGTH);
+}
+
+function formatTeamMemberRuntime(event: AgentEvent): string {
+  return [event.team?.agentType?.trim(), event.team?.model?.trim()].filter(Boolean).join("/");
+}
+
+function formatTeamEvent(event: AgentEvent): string[] {
+  if (!event.team) {
+    return [];
+  }
+
+  switch (event.team.kind) {
+    case "team_created": {
+      const teamName = event.team.teamName?.trim() || "unknown";
+      return [`🤝 Team ${teamName} 已创建`];
+    }
+
+    case "member_spawned": {
+      const memberName = event.team.memberName?.trim() || event.team.memberId?.trim() || "unknown";
+      const runtime = formatTeamMemberRuntime(event);
+      return [`👤 ${memberName}${runtime ? ` · ${runtime}` : ""} 已加入`];
+    }
+
+    case "task_started": {
+      const memberName = event.team.memberName?.trim() || event.team.memberId?.trim() || "unknown";
+      const description = event.team.taskDescription?.trim() || event.team.taskSubject?.trim() || event.content?.trim() || event.team.taskId?.trim() || "-";
+      return [`📌 ${memberName} 开始：${description}`];
+    }
+
+    case "task_completed": {
+      const memberName = event.team.memberName?.trim() || event.team.memberId?.trim() || "unknown";
+      const subject = event.team.taskSubject?.trim() || event.team.taskDescription?.trim() || event.content?.trim() || event.team.taskId?.trim() || "-";
+      return [`✅ ${memberName} 完成：${subject}`];
+    }
+
+    case "team_deleted": {
+      const teamName = event.team.teamName?.trim() || "unknown";
+      return [`🧹 Team ${teamName} 已结束`];
+    }
+
+    case "member_idle":
+      return [];
+
+    default:
+      return [];
+  }
+}
+
+function formatTeamMessage(event: AgentEvent): string[] {
+  if (!event.team) {
+    return [];
+  }
+
+  const memberName = event.team.memberName?.trim() || event.team.memberId?.trim() || "unknown";
+  const content = event.content?.trim();
+  if (!content) {
+    return [];
+  }
+
+  const lines = [`👤 ${memberName}`];
+  if (event.team.summary?.trim()) {
+    lines.push(`摘要：${event.team.summary.trim()}`);
+  }
+  lines.push(content);
+  return [lines.join("\n")];
 }
 
 function createEventRenderState(): EventRenderState {
@@ -123,6 +204,10 @@ function flushPendingToolUseMessages(_state: EventRenderState): string[] {
 }
 
 function renderToolUseEvent(event: AgentEvent, state: EventRenderState): string[] {
+  if (isStructuredTeamToolUse(event)) {
+    return [];
+  }
+
   const toolName = event.toolName?.trim() || "unknown";
   const description = normalizeToolDescription(event);
   const toolInput = normalizeToolInput(event);
@@ -157,6 +242,16 @@ function renderEventToMessages(event: AgentEvent, state: EventRenderState, optio
   }
 
   const messages = flushPendingToolUseMessages(state);
+
+  if (event.type === "team_event") {
+    messages.push(...formatTeamEvent(event));
+    return messages;
+  }
+
+  if (event.type === "team_message") {
+    messages.push(...formatTeamMessage(event));
+    return messages;
+  }
 
   if (event.type === "text" && options.includeText) {
     const content = event.content?.trim();

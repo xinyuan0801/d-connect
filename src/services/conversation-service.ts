@@ -3,6 +3,7 @@ import type { ProjectRuntime } from "./project-registry.js";
 import type { SessionRecord, SessionRepository } from "./session-repository.js";
 import { Logger } from "../infra/logging/logger.js";
 import { createEventMessageRenderer, formatResponseFromEvents, previewLogText, splitResponseMessages } from "./message-relay.js";
+import { applyTeamEventToState } from "./team-state.js";
 
 export interface RunConversationOptions {
   onMessage?: (message: string) => Promise<void>;
@@ -33,6 +34,10 @@ export class ConversationService {
 
   async save(): Promise<void> {
     await this.sessions.save();
+  }
+
+  setTeamState(session: SessionRecord, teamState?: SessionRecord["teamState"]): void {
+    this.sessions.setTeamState(session, teamState);
   }
 
   private async ensureAgentSession(runtime: ProjectRuntime, session: SessionRecord): Promise<AgentSession> {
@@ -106,6 +111,9 @@ export class ConversationService {
         });
         if (stillOwnsSession() && event.sessionId && event.sessionId.length > 0) {
           this.sessions.setAgentSessionId(session, event.sessionId);
+        }
+        if (event.type === "team_event" || event.type === "team_message") {
+          this.sessions.setTeamState(session, applyTeamEventToState(session.teamState, event));
         }
         for (const message of renderer.push(event)) {
           enqueueMessage(message);
